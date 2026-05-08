@@ -1,0 +1,3339 @@
+# -*- coding: utf-8 -*-
+"""
+Módulo para navegar y llenar formularios en SAP
+Contiene funciones para automatizar las consultas después del login
+"""
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
+import time
+import re
+
+
+class ConsultasSAP:
+    """
+    Clase para manejar las consultas y navegación en SAP
+    Después de que el usuario inicia sesión
+    """
+    
+    def __init__(self, driver_sap):
+        """
+        Inicializa el manejador de consultas
+        
+        Args:
+            driver_sap: Instancia de la clase DriverSAP
+        """
+        self.driver_sap = driver_sap
+        self.driver = driver_sap.driver
+    
+    def buscar_va01(self):
+        """
+        Busca y ejecuta la transacción VA01 (Crear Pedido de Cliente)
+        Esto navega a la pantalla de creación de pedidos
+        """
+        try:
+            print("\n--- Buscando transacción VA01 ---")
+            
+            # Dar tiempo a que cargue completamente
+            time.sleep(2)
+            
+            # Intentar encontrar el campo en el documento raíz primero
+            print(">> Buscando campo ToolbarOkCode...")
+            
+            try:
+                # Buscar en iframes
+                iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                print(f"  Encontrados {len(iframes)} iframes")
+                
+                # Intentar en cada iframe
+                for idx, iframe in enumerate(iframes):
+                    try:
+                        self.driver.switch_to.frame(iframe)
+                        elemento = self.driver.find_element(By.ID, 'ToolbarOkCode')
+                        print(f"  [OK] Campo encontrado en iframe {idx}")
+                        
+                        # Escribir VA01
+                        print(">> Escribiendo VA01...")
+                        elemento.clear()
+                        elemento.send_keys('VA01')
+                        time.sleep(0.5)
+                        
+                        # Presionar Enter
+                        print(">> Presionando Enter...")
+                        elemento.send_keys(Keys.RETURN)
+                        
+                        # Volver al contenido principal
+                        self.driver.switch_to.default_content()
+                        
+                        # Esperar a que cargue
+                        time.sleep(3)
+                        
+                        print("[OK] Navegación a VA01 completada")
+                        return True
+                        
+                    except:
+                        self.driver.switch_to.default_content()
+                        continue
+                
+                # Si no está en iframes, intentar directamente
+                print("  Intentando en contenido principal...")
+                elemento = self.driver.find_element(By.ID, 'ToolbarOkCode')
+                print(">> Escribiendo VA01...")
+                elemento.clear()
+                elemento.send_keys('VA01')
+                time.sleep(0.5)
+                
+                print(">> Presionando Enter...")
+                elemento.send_keys(Keys.RETURN)
+                
+                time.sleep(3)
+                print("[OK] Navegación a VA01 completada")
+                return True
+                
+            except Exception as e:
+                print(f"  [ERROR] Campo no encontrado: {str(e)}")
+                print("  Intentando alternativas...")
+                
+                # Alternativa: buscar por name o cualquier otro atributo
+                campo = self.driver.find_element(By.NAME, 'ToolbarOkCode')
+                campo.send_keys('VA01')
+                campo.send_keys(Keys.RETURN)
+                time.sleep(3)
+                print("[OK] VA01 encontrado con método alternativo")
+                return True
+            
+        except Exception as e:
+            print(f"[ERROR] Error al buscar VA01: {str(e)}")
+            return False
+    
+    def llenar_datos_organizativos(self, clase_pedido: str, org_ventas: str, canal_dist: str, sector: str):
+        """
+        Llena los datos organizativos en la pantalla de VA01
+        Clase pedido, Organización ventas, Canal distribución, Sector
+        
+        Args:
+            clase_pedido: Clase de pedido (ej: "zpec")
+            org_ventas: Organización de ventas (ej: "2100")
+            canal_dist: Canal de distribución (ej: "10")
+            sector: Sector (ej: "43")
+        """
+        try:
+            print("\n--- Rellenando datos organizativos ---")
+            
+            # Esperar a que la página cargue completamente
+            time.sleep(3)
+            
+            # Los campos están dentro del iframe ITSFRAME1
+            # Cambiar al iframe donde están los campos
+            self.driver.switch_to.frame("ITSFRAME1")
+            print("  [OK] Cambiado al iframe ITSFRAME1")
+            
+            # Llenar cada campo usando su ID exacto
+            # Campo 1: Clase de pedido - ID: M0:46:::2:22
+            print(f">> Ingresando Clase de pedido: {clase_pedido}")
+            campo_clase = self.driver.find_element(By.ID, "M0:46:::2:22")
+            campo_clase.clear()
+            campo_clase.send_keys(clase_pedido)
+            print(f"  [OK] Clase de pedido: {clase_pedido}")
+            time.sleep(0.3)
+            
+            # Campo 2: Organización ventas - ID: M0:46:::5:22
+            print(f">> Ingresando Organización ventas: {org_ventas}")
+            campo_org = self.driver.find_element(By.ID, "M0:46:::5:22")
+            campo_org.clear()
+            campo_org.send_keys(org_ventas)
+            print(f"  [OK] Organización ventas: {org_ventas}")
+            time.sleep(0.3)
+            
+            # Campo 3: Canal distribución - ID: M0:46:::6:22
+            print(f">> Ingresando Canal distribución: {canal_dist}")
+            campo_canal = self.driver.find_element(By.ID, "M0:46:::6:22")
+            campo_canal.clear()
+            campo_canal.send_keys(canal_dist)
+            print(f"  [OK] Canal distribución: {canal_dist}")
+            time.sleep(0.3)
+            
+            # Campo 4: Sector - ID: M0:46:::7:22
+            print(f">> Ingresando Sector: {sector}")
+            campo_sector = self.driver.find_element(By.ID, "M0:46:::7:22")
+            campo_sector.clear()
+            campo_sector.send_keys(sector)
+            print(f"  [OK] Sector: {sector}")
+            time.sleep(0.5)
+            
+            # Presionar Enter para continuar
+            print(">> Presionando Enter para continuar...")
+            campo_toolbar = self.driver.find_element(By.ID, "ToolbarOkCode")
+            campo_toolbar.send_keys(Keys.ENTER)
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            time.sleep(3)
+            print("  [OK] Datos organizativos completados y enviados")
+            return True
+            
+        except Exception as e:
+            # Si hay error, volver al contenido principal
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al llenar datos: {str(e)}")
+            return False
+    
+    def _llenar_campo_por_label(self, nombre_etiqueta: str, valor: str):
+        """
+        Auxiliar para encontrar y llenar un campo por su label/nombre en SAP
+        
+        Args:
+            nombre_etiqueta: Texto del label (ej: "Organización ventas")
+            valor: Valor a ingresar
+        """
+        try:
+            # En SAP NetWeaver, los campos suelen estar en inputs que están cerca del label
+            # Intentamos varios XPath para encontrar el campo
+            
+            selectores = [
+                # Busca input después del label
+                f"//*[contains(text(), '{nombre_etiqueta}')]/following::input[1]",
+                # Busca input en el mismo contenedor
+                f"//*[contains(text(), '{nombre_etiqueta}')]/../following-sibling::*//input[1]",
+                # Busca input cercano (dentro del mismo div/span)
+                f"//*[contains(., '{nombre_etiqueta}')]//following-sibling::input[1]",
+                # Busca todos los inputs y usa el primero que esté visible
+                f"//input[@*[contains(., '{nombre_etiqueta}')]] | //input[@title[contains(., '{nombre_etiqueta}')]]",
+            ]
+            
+            for xpath in selectores:
+                try:
+                    campos = self.driver.find_elements(By.XPATH, xpath)
+                    if campos and len(campos) > 0:
+                        for campo in campos:
+                            try:
+                                if campo.is_displayed():
+                                    campo.clear()
+                                    time.sleep(0.2)
+                                    campo.send_keys(valor)
+                                    print(f"  [OK] {nombre_etiqueta}: {valor}")
+                                    return True
+                            except:
+                                continue
+                except:
+                    continue
+            
+            # Si no encontró, buscar por valor más general
+            # Buscar todos los inputs y esperar que el usuario haya hecho click en el campo
+            print(f"  [WARN] Campo '{nombre_etiqueta}' no encontrado automáticamente")
+            print(f"    -> Asegúrate de que el campo esté visible en pantalla")
+                    
+        except Exception as e:
+            print(f"  [WARN] Error al llenar {nombre_etiqueta}: {str(e)}")
+    
+    def ingresar_cedula_solicitante(self, cedula: str):
+        """
+        Ingresa la cédula del cliente en el campo Solicitante
+        En la pantalla de "Crear Pedido Ecommerce CF"
+        
+        Args:
+            cedula: Cédula del cliente
+        """
+        try:
+            print(f"\n--- Ingresando cedula del cliente ---")
+            print(f">> Buscando campo Solicitante...")
+            
+            # Cambiar al iframe si es necesario
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except:
+                pass
+            
+            # Buscar el campo Solicitante por su ID
+            campo_solicitante = None
+            try:
+                # Intentar por el ID específico del campo
+                campo_solicitante = self.driver.find_element(By.ID, "M0:46:1:1::0:17")
+                print("  [OK] Campo Solicitante encontrado por ID")
+            except:
+                # Si no funciona, buscar por title
+                try:
+                    campo_solicitante = self.driver.find_element(By.XPATH, "//input[@title='Solicitante']")
+                    print("  [OK] Campo Solicitante encontrado por title")
+                except:
+                    print("  [ERROR] No se encontro el campo Solicitante")
+                    return False
+            
+            # Hacer click en el campo para que aparezca la lupa
+            print(">> Haciendo click en el campo Solicitante...")
+            campo_solicitante.click()
+            time.sleep(0.5)
+            
+            # En lugar de buscar la lupa, usar F4 (atajo estándar de SAP)
+            print(">> Presionando F4 para abrir popup de busqueda...")
+            campo_solicitante.send_keys(Keys.F4)
+            time.sleep(2)
+            print("[OK] Popup de busqueda abierto")
+            
+            # El popup "Limitar ámbito de valores" se abre
+            # El campo "Conc.búsq." suele quedar enfocado automáticamente
+            # Usar el elemento activo directamente
+            print(">> Escribiendo cedula en campo 'Conc.busq.'...")
+            
+            # Primero intentar con el elemento activo (ya enfocado)
+            try:
+                campo_busqueda = self.driver.switch_to.active_element
+                campo_busqueda.clear()
+                campo_busqueda.send_keys(str(cedula))
+                time.sleep(0.5)
+                
+                print(f"  [OK] Cedula '{cedula}' escrita en campo activo")
+                
+                print(">> Presionando Enter...")
+                campo_busqueda.send_keys(Keys.RETURN)
+                time.sleep(2)
+                print("[OK] Busqueda ejecutada")
+                
+                # Seleccionar el solicitante: siempre el número que empieza con '11'
+                print(">> Seleccionando solicitante (numero que empieza con 11)...")
+                resultado = self._seleccionar_fila_popup_por_prefijo('11')
+                if resultado is None:
+                    # Fallback: seleccionar primera coincidencia con Enter
+                    print("  [INFO] Fallback: seleccionando primera coincidencia con Enter")
+                    elemento_activo = self.driver.switch_to.active_element
+                    elemento_activo.send_keys(Keys.RETURN)
+                    time.sleep(2)
+                print("[OK] Solicitante seleccionado")
+                
+            except Exception as ex:
+                print(f"[WARN] Error con elemento activo: {str(ex)}")
+                
+            except Exception as e:
+                print(f"[WARN] Error al buscar lupa: {str(e)}")
+                print(">> Intentando presionar F4...")
+                try:
+                    campo_solicitante.send_keys(Keys.F4)
+                    time.sleep(2)
+                except:
+                    pass
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Cedula ingresada y busqueda activada")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al ingresar cedula: {str(e)}")
+            return False
+
+    def _seleccionar_fila_popup_por_prefijo(self, prefijo: str):
+        """
+        En el popup Lst.aciertos, selecciona la fila cuyo número de cliente
+        empieza con el prefijo dado (ej: '11' para Solicitante, '55' para Destinatario).
+        Los números de cliente están en los divs con ID patrón M1:46:::ROW:27_l.
+
+        Returns:
+            True si encontró y seleccionó la fila correcta.
+            None si no pudo determinar (el llamador debe aplicar su fallback).
+        """
+        try:
+            time.sleep(1)
+
+            # Los números de cliente siempre están en la columna 27 del popup
+            celdas_numero = self.driver.find_elements(
+                By.XPATH,
+                "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
+            )
+
+            if not celdas_numero:
+                print(f"  [INFO] No se encontraron celdas de numero en popup, usando fallback")
+                return None
+
+            print(f"  [INFO] {len(celdas_numero)} fila(s) en popup - analizando prefijos...")
+
+            for celda in celdas_numero:
+                numero = celda.text.strip()
+                print(f"  [INFO] Celda {celda.get_attribute('id')}: '{numero}'")
+                if numero.startswith(prefijo):
+                    print(f"  [OK] Seleccionando fila con cliente {numero} (prefijo '{prefijo}')")
+                    ActionChains(self.driver).double_click(celda).perform()
+                    time.sleep(2)
+                    return True
+
+            print(f"  [WARN] No se encontro fila con prefijo '{prefijo}', aplicando fallback")
+            return None
+
+        except Exception as e:
+            print(f"  [WARN] Error en _seleccionar_fila_popup_por_prefijo: {str(e)}")
+            return None
+
+    def ingresar_cedula_destinatario(self, cedula: str):
+        """
+        Ingresa la cédula del cliente en el campo Destinat.mcía.
+        (campo debajo de Solicitante) y selecciona la SEGUNDA coincidencia.
+        
+        Args:
+            cedula: Cédula del cliente
+        """
+        try:
+            print(f"\n--- Ingresando cedula en Destinat.mcia. ---")
+            print(f">> Buscando campo Destinat.mcia...")
+            
+            # Primero volver al default y luego entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo Destinat.mcía. por su ID
+            campo_destinatario = None
+            ids_posibles = ["M0:46:1:1::1:17", "M0:46:1:1::0:34", "M0:46:1:2::0:17"]
+            
+            for id_campo in ids_posibles:
+                try:
+                    campo_destinatario = self.driver.find_element(By.ID, id_campo)
+                    print(f"  [OK] Campo Destinat.mcia. encontrado por ID: {id_campo}")
+                    break
+                except:
+                    print(f"  -- ID {id_campo} no encontrado")
+                    continue
+            
+            if not campo_destinatario:
+                try:
+                    campo_destinatario = self.driver.find_element(By.XPATH, "//input[contains(@title,'Destinat')]")
+                    print("  [OK] Campo Destinat.mcia. encontrado por title")
+                except:
+                    pass
+            
+            if not campo_destinatario:
+                try:
+                    campo_destinatario = self.driver.find_element(By.XPATH, "//*[contains(text(),'Destinat')]/following::input[1]")
+                    print("  [OK] Campo Destinat.mcia. encontrado por label")
+                except:
+                    pass
+            
+            if not campo_destinatario:
+                # Listar todos los inputs visibles para debug
+                print("  [WARN] Campo no encontrado, listando inputs visibles...")
+                try:
+                    inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                    for inp in inputs:
+                        if inp.is_displayed():
+                            inp_id = inp.get_attribute("id") or "sin-id"
+                            inp_title = inp.get_attribute("title") or ""
+                            inp_val = inp.get_attribute("value") or ""
+                            print(f"    input: id={inp_id}, title='{inp_title}', value='{inp_val}'")
+                except:
+                    pass
+                print("  [ERROR] No se encontro el campo Destinat.mcia.")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Click en el campo y F4
+            print(">> Haciendo click en el campo Destinat.mcia...")
+            campo_destinatario.click()
+            time.sleep(0.5)
+            
+            print(">> Presionando F4 para abrir popup de busqueda...")
+            campo_destinatario.send_keys(Keys.F4)
+            time.sleep(2)
+            print("[OK] Popup de busqueda abierto")
+            
+            # Escribir cedula y buscar
+            print(">> Escribiendo cedula en campo 'Conc.busq.'...")
+            try:
+                campo_busqueda = self.driver.switch_to.active_element
+                campo_busqueda.clear()
+                campo_busqueda.send_keys(str(cedula))
+                time.sleep(0.5)
+                print(f"  [OK] Cedula '{cedula}' escrita")
+                
+                print(">> Presionando Enter para buscar...")
+                campo_busqueda.send_keys(Keys.RETURN)
+                time.sleep(3)
+                print("[OK] Busqueda ejecutada")
+                
+                # Seleccionar el destinatario: siempre el número que empieza con '55'
+                print(">> Seleccionando destinatario (numero que empieza con 55)...")
+                resultado = self._seleccionar_fila_popup_por_prefijo('55')
+                if resultado is None:
+                    # Fallback: seleccionar segunda coincidencia por ID conocido
+                    print("  [INFO] Fallback: seleccionando segunda coincidencia (M1:46:::9:1_l)")
+                    try:
+                        segunda_opcion = self.driver.find_element(By.ID, "M1:46:::9:1_l")
+                        print(f"  [OK] Encontrada: '{segunda_opcion.text.strip()}'")
+                        ActionChains(self.driver).double_click(segunda_opcion).perform()
+                        time.sleep(2)
+                        print("[OK] Segunda opcion seleccionada")
+                    except Exception as ex_lista:
+                        print(f"[WARN] Error al seleccionar segunda opcion: {str(ex_lista)}")
+                
+            except Exception as ex:
+                print(f"[WARN] Error: {str(ex)}")
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Destinat.mcia. completado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al ingresar destinatario: {str(e)}")
+            return False
+
+    def ingresar_numero_pedido_cliente(self, cedula: str):
+        """
+        Ingresa la cédula en el campo N° ped.cliente
+        
+        Args:
+            cedula: Cédula del cliente
+        """
+        try:
+            print(f"\n--- Ingresando N ped.cliente ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo N ped.cliente
+            campo_pedido = None
+            ids_posibles = ["M0:46:1::3:17", "M0:46:1:1::2:17", "M0:46:1:1::0:51", "M0:46:1:3::0:17"]
+            
+            for id_campo in ids_posibles:
+                try:
+                    campo_pedido = self.driver.find_element(By.ID, id_campo)
+                    print(f"  [OK] Campo N ped.cliente encontrado por ID: {id_campo}")
+                    break
+                except:
+                    continue
+            
+            if not campo_pedido:
+                try:
+                    campo_pedido = self.driver.find_element(By.XPATH, "//input[contains(@title,'ped.cliente')]")
+                    print("  [OK] Campo N ped.cliente encontrado por title")
+                except:
+                    pass
+            
+            if not campo_pedido:
+                try:
+                    campo_pedido = self.driver.find_element(By.XPATH, "//*[contains(text(),'ped.cliente')]/following::input[1]")
+                    print("  [OK] Campo N ped.cliente encontrado por label")
+                except:
+                    pass
+            
+            if not campo_pedido:
+                print("  [WARN] Campo no encontrado, listando inputs visibles...")
+                try:
+                    inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                    for inp in inputs:
+                        if inp.is_displayed():
+                            inp_id = inp.get_attribute("id") or "sin-id"
+                            inp_title = inp.get_attribute("title") or ""
+                            inp_val = inp.get_attribute("value") or ""
+                            print(f"    input: id={inp_id}, title='{inp_title}', value='{inp_val}'")
+                except:
+                    pass
+                print("  [ERROR] No se encontro el campo N ped.cliente")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Escribir la cedula en el campo
+            print(f">> Escribiendo cedula '{cedula}' en N ped.cliente...")
+            campo_pedido.click()
+            time.sleep(0.3)
+            campo_pedido.clear()
+            campo_pedido.send_keys(str(cedula))
+            time.sleep(0.5)
+            print(f"  [OK] Cedula '{cedula}' escrita en N ped.cliente")
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] N ped.cliente completado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al ingresar N ped.cliente: {str(e)}")
+            return False
+
+    def confirmar_numero_pedido_cliente(self, telefono=None):
+        """
+        Presiona Enter en el campo N° ped.cliente para confirmar y habilitar Material/Cantidad
+        
+        Args:
+            telefono: Número de teléfono del cliente del Excel (opcional, ya no se usa aquí)
+        """
+        try:
+            print(f"\n--- Confirmando N ped.cliente con Enter ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo N ped.cliente
+            campo_pedido = None
+            ids_posibles = ["M0:46:1::3:17", "M0:46:1:1::2:17", "M0:46:1:1::0:51", "M0:46:1:3::0:17"]
+            
+            for id_campo in ids_posibles:
+                try:
+                    campo_pedido = self.driver.find_element(By.ID, id_campo)
+                    print(f"  [OK] Campo N ped.cliente encontrado por ID: {id_campo}")
+                    break
+                except:
+                    continue
+            
+            if not campo_pedido:
+                print("  [ERROR] No se encontro el campo N ped.cliente")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Hacer click y presionar Enter
+            print(">> Presionando Enter en N ped.cliente...")
+            campo_pedido.click()
+            time.sleep(0.3)
+            campo_pedido.send_keys(Keys.ENTER)
+            time.sleep(1.5)
+            print("  [OK] Enter presionado")
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] N ped.cliente confirmado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al confirmar N ped.cliente: {str(e)}")
+            return False
+
+    def verificar_y_corregir_pedido_duplicado(self, telefono):
+        """
+        Verifica si hay error de pedido duplicado después de seleccionar Pedido Ecommerce
+        Si lo detecta, espera a que se desbloqueen los campos y reemplaza la cédula por el teléfono
+        
+        Args:
+            telefono: Número de teléfono del cliente del Excel
+            
+        Returns:
+            True si se corrigió el error o no hubo error, False si hubo problema
+        """
+        try:
+            print(f"\n--- Verificando pedido duplicado ---")
+            
+            # Entrar al iframe para verificar mensaje
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Hacer polling para capturar el mensaje antes de que desaparezca
+            # El mensaje aparece, los campos se bloquean, y luego desaparece cuando se habilitan
+            error_detectado = False
+            texto_mensaje = ""
+            
+            print("  [INFO] Buscando mensaje de error con polling...")
+            for intento in range(3):  # Intentar 3 veces (3 segundos total)
+                time.sleep(1)
+                
+                try:
+                    mensaje_span = self.driver.find_element(By.XPATH, "//span[@id='wnd[0]/sbar_msg-txt']")
+                    texto_mensaje = mensaje_span.text.strip()
+                    
+                    if texto_mensaje and "ya existente en documento" in texto_mensaje:
+                        print(f"  [WARN] Pedido duplicado detectado en intento {intento + 1}: {texto_mensaje}")
+                        error_detectado = True
+                        break  # Salir del loop inmediatamente
+                    elif texto_mensaje:
+                        print(f"  [DEBUG] Intento {intento + 1}: Mensaje encontrado pero no es error de duplicado: '{texto_mensaje}'")
+                except:
+                    # No se encontró el mensaje en este intento
+                    pass
+            
+            if error_detectado:
+                print(f"  [INFO] Esperando a que se desbloqueen los campos...")
+                # Esperar a que los campos se desbloqueen (SAP los bloquea temporalmente)
+                time.sleep(5)
+                
+                if not telefono:
+                    print("  [ERROR] No se tiene teléfono del cliente para reemplazar")
+                    self.driver.switch_to.default_content()
+                    return False
+                
+                print(f"  [INFO] Reemplazando cédula por teléfono: {telefono}")
+                
+                # Buscar el campo N° ped.cliente
+                campo_pedido = None
+                ids_posibles = ["M0:46:1::3:17", "M0:46:1:1::2:17", "M0:46:1:1::0:51", "M0:46:1:3::0:17"]
+                
+                for id_campo in ids_posibles:
+                    try:
+                        campo_pedido = self.driver.find_element(By.ID, id_campo)
+                        print(f"  [OK] Campo N° ped.cliente encontrado: {id_campo}")
+                        break
+                    except:
+                        continue
+                
+                if not campo_pedido:
+                    print("  [ERROR] No se encontró el campo N° ped.cliente para corregir")
+                    self.driver.switch_to.default_content()
+                    return False
+                
+                # Limpiar el campo y escribir el teléfono
+                campo_pedido.click()
+                time.sleep(0.5)
+                campo_pedido.clear()
+                time.sleep(0.3)
+                campo_pedido.send_keys(telefono)
+                time.sleep(0.5)
+                print(f"  [OK] Teléfono '{telefono}' escrito en N° ped.cliente")
+                
+                # Volver al contenido principal
+                self.driver.switch_to.default_content()
+                return True
+            else:
+                # No se detectó error después de 8 intentos
+                print("  [OK] No se detectó error de pedido duplicado")
+                self.driver.switch_to.default_content()
+                return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al verificar pedido duplicado: {str(e)}")
+            return False
+
+    def seleccionar_modific_cantidad(self):
+        """
+        Selecciona 'Modific.cantidad' en el campo dropdown correspondiente
+        """
+        try:
+            print(f"\n--- Seleccionando Modific.cantidad ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1.5)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+                time.sleep(1)  # Esperar a que el iframe cargue completamente
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo por ID
+            campo_modific = None
+            ids_posibles = ["M0:46:2:3B256:1::2:17", "M0:46:2:3B256:1::2:22"]
+            
+            for id_campo in ids_posibles:
+                try:
+                    campo_modific = self.driver.find_element(By.ID, id_campo)
+                    print(f"  [OK] Campo Modific.cantidad encontrado por ID: {id_campo}")
+                    break
+                except:
+                    continue
+            
+            if not campo_modific:
+                print("  [ERROR] No se encontro el campo Modific.cantidad")
+                print("  [DEBUG] Listando inputs disponibles...")
+                try:
+                    inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                    for inp in inputs[:20]:  # Solo los primeros 20
+                        if inp.is_displayed():
+                            inp_id = inp.get_attribute("id") or "sin-id"
+                            inp_ct = inp.get_attribute("ct") or ""
+                            inp_val = inp.get_attribute("value") or ""
+                            print(f"    input: id={inp_id}, ct={inp_ct}, value='{inp_val}'")
+                except:
+                    pass
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Hacer click y escribir el valor
+            print(">> Seleccionando 'Modific.cantidad'...")
+            print(f"  [DEBUG] Campo encontrado - ID: {campo_modific.get_attribute('id')}")
+            
+            # Click simple en el campo
+            campo_modific.click()
+            time.sleep(0.8)
+            print("  [DEBUG] Click realizado")
+            
+            # Escribir 'mod' directamente (sin clear)
+            campo_modific.send_keys("mod")
+            time.sleep(0.8)
+            print("  [DEBUG] 'mod' enviado al campo")
+            
+            # Verificar el valor del campo
+            valor = campo_modific.get_attribute("value")
+            print(f"  [DEBUG] Valor actual en el campo: '{valor}'")
+            
+            # Presionar TAB para salir del campo y cerrar el dropdown
+            campo_modific.send_keys(Keys.TAB)
+            time.sleep(0.8)
+            print("  [OK] 'mod' escrito y dropdown cerrado con TAB")
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Modific.cantidad completado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al seleccionar Modific.cantidad: {str(e)}")
+            return False
+
+    def seleccionar_pedido_ecommerce(self):
+        """
+        Selecciona 'Pedido Ecommerce Cliente Final' en el campo de tipo de pedido
+        """
+        try:
+            print(f"\n--- Seleccionando Pedido Ecommerce Cliente Final ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo por ID
+            campo_pedido = None
+            ids_posibles = ["M0:46:2:3B256:1::8:17", "M0:46:2:3B256:1::8:22"]
+            
+            for id_campo in ids_posibles:
+                try:
+                    campo_pedido = self.driver.find_element(By.ID, id_campo)
+                    print(f"  [OK] Campo Pedido Ecommerce encontrado por ID: {id_campo}")
+                    break
+                except:
+                    continue
+            
+            if not campo_pedido:
+                print("  [ERROR] No se encontro el campo Pedido Ecommerce")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Hacer click y escribir "P"
+            print(">> Seleccionando 'Pedido Ecommerce Cliente Final'...")
+            campo_pedido.click()
+            time.sleep(0.5)
+            
+            # Escribir P y navegar con flechas
+            elemento_activo = self.driver.switch_to.active_element
+            elemento_activo.send_keys("P")
+            time.sleep(0.8)
+            
+            # Bajar con flechas hasta "Pedido Ecommerce Cliente Final"
+            # Necesita bajar 9 veces para llegar a "Pedido Ecommerce Cliente Final"
+            for i in range(9):
+                elemento_activo.send_keys(Keys.ARROW_DOWN)
+                time.sleep(0.4)
+            
+            time.sleep(0.5)
+            elemento_activo.send_keys(Keys.ENTER)
+            time.sleep(1.5)  # Esperar a que se procese y aparezca el modal si existe
+            print("  [OK] 'Pedido Ecommerce Cliente Final' seleccionado")
+            
+            # Verificar si apareció modal informativo y cerrarlo con ENTER
+            self.verificar_y_cerrar_modal_informativo()
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Pedido Ecommerce completado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            error_msg = str(e)
+            
+            # Re-lanzar excepciones críticas que requieren omisión de cliente
+            if "hay que seleccionar detalle de venta" in error_msg:
+                print(f"[CRITICAL] Re-lanzando error crítico: {error_msg}")
+                raise
+            
+            print(f"[ERROR] Error al seleccionar Pedido Ecommerce: {error_msg}")
+            return False
+    
+    def verificar_y_continuar_control_disponibilidad(self):
+        """
+        Verifica si aparece la ventana de "Control de disponibilidad" después de ingresar material
+        y hace click en el botón "Continuar" si está presente
+        
+        Returns:
+            bool: True si se hizo click en continuar o no apareció, False si hubo error
+        """
+        try:
+            # Intentar encontrar el botón "Continuar" (puede o no aparecer)
+            # Estrategia 1: Por title que contiene "Continuar sin confirmación"
+            boton_continuar = None
+            try:
+                boton_continuar = self.driver.find_element(By.XPATH, 
+                    "//div[@role='button' and contains(@title, 'Continuar sin confirmación')]")
+                print("  [INFO] Detectada ventana 'Control de disponibilidad'")
+            except:
+                # Estrategia 2: Por lsdata que contiene 'Continuar'
+                try:
+                    boton_continuar = self.driver.find_element(By.XPATH, 
+                        "//*[@role='button' and contains(@lsdata, \"0:'Continuar'\")]")
+                    print("  [INFO] Detectada ventana 'Control de disponibilidad' (estrategia 2)")
+                except:
+                    # Estrategia 3: Por id que contiene btn[18]
+                    try:
+                        boton_continuar = self.driver.find_element(By.XPATH, 
+                            "//*[contains(@id, 'btn[18]') and @role='button']")
+                        print("  [INFO] Detectada ventana 'Control de disponibilidad' (estrategia 3)")
+                    except:
+                        # No apareció la ventana, es normal
+                        return True
+            
+            # Si encontramos el botón, hacer click
+            if boton_continuar:
+                print("  >> Haciendo click en 'Continuar'...")
+                boton_continuar.click()
+                time.sleep(1)
+                print("  [OK] Click en 'Continuar' realizado")
+                return True
+            
+            return True
+            
+        except Exception as e:
+            # Si hay error aquí no es crítico, el material ya se ingresó
+            print(f"  [DEBUG] No se detectó ventana de control de disponibilidad: {str(e)[:100]}")
+            return True
+
+    def verificar_y_cerrar_modal_informativo(self):
+        """
+        Verifica si aparece un modal informativo después de seleccionar el tipo de pedido
+        (por ejemplo: "Área de ventas 1100 10 94 se ha determinado de nuevo")
+        y lo cierra presionando ENTER
+        
+        Returns:
+            bool: True si se cerró el modal o no apareció, False si hubo error
+        """
+        try:
+            # Esperar suficiente para que el modal cargue completamente
+            time.sleep(1.5)
+            
+            # **VALIDACIÓN ESPECIAL**: Detectar modal SAPMSSY0120_1 que requiere selección de detalle de venta
+            # El modal está en el documento principal, no dentro del iframe
+            def _check_modal_detalle_venta():
+                """Busca el modal SAPMSSY0120_1 en el doc principal y dentro del iframe"""
+                # Buscar en documento principal
+                try:
+                    self.driver.switch_to.default_content()
+                    m = self.driver.find_element(By.ID, "SAPMSSY0120_1")
+                    if m.is_displayed():
+                        return True
+                except NoSuchElementException:
+                    pass
+                except Exception:
+                    pass
+                # Buscar por ct='PW' en documento principal (por si el ID cambia)
+                try:
+                    self.driver.switch_to.default_content()
+                    m = self.driver.find_element(By.XPATH,
+                        "//div[@ct='PW' and @role='dialog' and contains(@id,'SAPMSSY0120')]")
+                    if m.is_displayed():
+                        return True
+                except Exception:
+                    pass
+                return False
+
+            if _check_modal_detalle_venta():
+                print("  [CRITICAL] Modal de 'Seleccionar Detalle de Venta' detectado (SAPMSSY0120_1)")
+                print("  [CRITICAL] Este cliente requiere selección manual de detalle de venta")
+                raise Exception("hay que seleccionar detalle de venta")
+            
+            # Volver al iframe para buscar modales informativos normales
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+            except:
+                pass
+            
+            # Buscar el modal por diferentes estrategias
+            modal_encontrado = False
+            
+            # Estrategia 1: Buscar por clase lsPopupWindow que es un modal
+            try:
+                modal = self.driver.find_element(By.CLASS_NAME, "lsPopupWindow")
+                if modal.is_displayed():
+                    # Verificar que no sea el modal especial SAPMSSY0120_1
+                    modal_id = modal.get_attribute("id") or ""
+                    if "SAPMSSY0120" in modal_id:
+                        print("  [CRITICAL] Modal SAPMSSY0120_1 detectado en estrategia 1")
+                        raise Exception("hay que seleccionar detalle de venta")
+                    print("  [INFO] Modal informativo detectado (estrategia 1)")
+                    modal_encontrado = True
+            except (NoSuchElementException,):
+                pass
+            
+            # Estrategia 2: Buscar por GuiModalWindow en lsdata
+            if not modal_encontrado:
+                try:
+                    modal = self.driver.find_element(By.XPATH, 
+                        "//*[contains(@lsdata, 'GuiModalWindow') and @role='dialog']")
+                    if modal.is_displayed():
+                        print("  [INFO] Modal informativo detectado (estrategia 2)")
+                        modal_encontrado = True
+                except:
+                    pass
+            
+            # Estrategia 3: Buscar por div con ct='PW' (Popup Window)
+            if not modal_encontrado:
+                try:
+                    modal = self.driver.find_element(By.XPATH, 
+                        "//div[@ct='PW' and contains(@class, 'lsPopupWindow')]")
+                    if modal.is_displayed():
+                        print("  [INFO] Modal informativo detectado (estrategia 3)")
+                        modal_encontrado = True
+                except:
+                    pass
+            
+            if modal_encontrado:
+                # Primero intentar hacer click en botón "Continuar (Entrada)"
+                boton_continuar_entrada = None
+                try:
+                    # Buscar botón "Continuar (Entrada)" - aparece después de ingresar cantidad
+                    boton_continuar_entrada = self.driver.find_element(By.XPATH,
+                        "//*[@role='button' and contains(@title, 'Continuar (Entrada)')]")
+                    if boton_continuar_entrada and boton_continuar_entrada.is_displayed():
+                        print("  >> Haciendo click en botón 'Continuar (Entrada)'...")
+                        boton_continuar_entrada.click()
+                        time.sleep(1)
+                        print("  [OK] Click en 'Continuar (Entrada)' realizado")
+                        return True
+                except:
+                    pass
+                
+                # Si no encontró el botón "Continuar (Entrada)", cerrar con ENTER
+                # Cerrar el modal presionando ENTER
+                print("  >> Cerrando modal informativo con ENTER...")
+                try:
+                    # Intentar primero con el elemento activo
+                    elemento_activo = self.driver.switch_to.active_element
+                    elemento_activo.send_keys(Keys.RETURN)
+                    time.sleep(0.8)
+                    print("  [OK] Modal cerrado con ENTER")
+                    return True
+                except:
+                    # Si falla, usar ActionChains
+                    try:
+                        ActionChains(self.driver).send_keys(Keys.RETURN).perform()
+                        time.sleep(0.8)
+                        print("  [OK] Modal cerrado con ENTER (ActionChains)")
+                        return True
+                    except Exception as e:
+                        print(f"  [WARN] No se pudo cerrar modal con ENTER: {str(e)[:100]}")
+                        return True  # Continuar de todos modos
+            else:
+                # No apareció modal, es normal
+                print("  [DEBUG] No se detectó modal informativo")
+                return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            # Re-lanzar excepciones críticas que requieren omisión de cliente
+            if "hay que seleccionar detalle de venta" in error_msg:
+                print(f"  [CRITICAL] Re-lanzando error crítico desde verificar_y_cerrar_modal_informativo")
+                raise
+            
+            # Si hay error aquí no es crítico
+            print(f"  [DEBUG] Error detectando modal informativo: {error_msg[:100]}")
+            return True
+
+    def ingresar_material_cantidad(self, material: str, cantidad: str):
+        """
+        Ingresa el material y la cantidad en las posiciones de la tabla
+        Después del control de disponibilidad, SAP automáticamente posiciona el cursor
+        en el siguiente campo de material vacío.
+        
+        Args:
+            material: Código del material
+            cantidad: Cantidad del material
+        """
+        try:
+            print(f"\n--- Ingresando Material y Cantidad ---")
+            print(f"  Material: {material}, Cantidad: {cantidad}")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(0.5)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Obtener el elemento activo (SAP posiciona el cursor automáticamente)
+            # Si es el primer material, estará en el primer campo
+            # Si es el segundo+, estará donde SAP dejó el cursor después del "Continuar"
+            print(f">> Escribiendo Material '{material}' en elemento activo...")
+            
+            # Esperar hasta que el campo activo NO sea N° ped.cliente (SAP desbloqueando)
+            max_espera = 10
+            for intento_espera in range(max_espera):
+                time.sleep(1)
+                elemento_activo = self.driver.switch_to.active_element
+                try:
+                    elemento_id = elemento_activo.get_attribute('id') or 'sin-id'
+                except:
+                    elemento_id = 'sin-id'
+                
+                # Si el campo activo ya no es N° ped.cliente, los campos están desbloqueados
+                if 'M0:46:1::3:17' not in elemento_id:
+                    print(f"  [OK] Campos desbloqueados en intento {intento_espera + 1} (activo: {elemento_id})")
+                    break
+                else:
+                    print(f"  [WAIT] Intento {intento_espera + 1}/{max_espera} - Campos aun bloqueados (activo: {elemento_id})")
+                    if intento_espera == max_espera - 1:
+                        print(f"  [WARN] Campos no se desbloquearon tras {max_espera}s, intentando continuar...")
+            
+            # Re-obtener elemento activo
+            elemento_activo = self.driver.switch_to.active_element
+            try:
+                elemento_id = elemento_activo.get_attribute('id') or 'sin-id'
+                print(f"  [DEBUG] Elemento activo final: {elemento_id}")
+            except:
+                print(f"  [DEBUG] No se pudo obtener ID del elemento activo")
+            
+            # Limpiar el campo (por seguridad)
+            try:
+                elemento_activo.clear()
+            except:
+                pass
+            
+            # Seleccionar todo y escribir el material
+            elemento_activo.send_keys(Keys.CONTROL + 'a')
+            time.sleep(0.1)
+            elemento_activo.send_keys(material)
+            time.sleep(0.5)
+            print(f"  [OK] Material '{material}' escrito")
+            
+            # Mover al campo de cantidad con TAB
+            print(f">> Moviendo al campo Cantidad con TAB...")
+            elemento_activo.send_keys(Keys.TAB)
+            time.sleep(0.5)
+            
+            # Escribir la cantidad en el nuevo elemento activo
+            elemento_activo = self.driver.switch_to.active_element
+            
+            try:
+                elemento_id = elemento_activo.get_attribute('id') or 'sin-id'
+                print(f"  [DEBUG] Campo cantidad: {elemento_id}")
+            except:
+                pass
+            
+            # Limpiar campo de cantidad
+            try:
+                elemento_activo.clear()
+            except:
+                pass
+            
+            elemento_activo.send_keys(Keys.CONTROL + 'a')
+            time.sleep(0.1)
+            elemento_activo.send_keys(cantidad)
+            time.sleep(0.5)
+            print(f"  [OK] Cantidad '{cantidad}' escrita")
+            
+            # Presionar ENTER para confirmar la fila
+            print(f">> Confirmando fila con ENTER...")
+            elemento_activo.send_keys(Keys.ENTER)
+            print(f"  [OK] ENTER presionado, esperando respuesta de SAP...")
+            
+            # Esperar a que SAP procese
+            time.sleep(2)
+            
+            # Verificar si apareció ventana de "Control de disponibilidad" y hacer click en Continuar
+            print(f"  [INFO] Verificando si aparece control de disponibilidad...")
+            self.verificar_y_continuar_control_disponibilidad()
+            
+            # Verificar si aparece modal informativo (incluyendo "Continuar (Entrada)")
+            print(f"  [INFO] Verificando si aparece modal informativo...")
+            self.verificar_y_cerrar_modal_informativo()
+            
+            # Esperar adicional después del control de disponibilidad
+            # SAP posiciona automáticamente el cursor en el siguiente campo
+            time.sleep(1)
+            
+            # Verificar si hay mensajes de error
+            hay_error = False
+            texto_mensaje = ""
+            
+            for intento in range(3):  # Intentar 3 veces con pausas
+                time.sleep(0.8)
+                
+                try:
+                    mensaje_span = self.driver.find_element(By.XPATH, "//span[@id='wnd[0]/sbar_msg-txt']")
+                    texto_mensaje = mensaje_span.text.strip()
+                    
+                    if texto_mensaje:
+                        print(f"  [DEBUG] Mensaje SAP encontrado en intento {intento + 1}: '{texto_mensaje}'")
+                        
+                        # Verificar si es un mensaje de error
+                        if ("Bloqueo" in texto_mensaje or 
+                            "status" in texto_mensaje or 
+                            "Error" in texto_mensaje or 
+                            "error" in texto_mensaje or
+                            "no está previsto" in texto_mensaje or
+                            "no esta previsto" in texto_mensaje):
+                            print(f"  [ERROR] {texto_mensaje}")
+                            print(f"  [CRITICAL] Material {material} tiene error/bloqueo. Omitiendo cliente")
+                            
+                            # Detectar si es un bloqueo específico
+                            if "Bloqueo" in texto_mensaje or "bloqueado" in texto_mensaje.lower():
+                                error_msg = f"Cliente bloqueado - Material {material} bloqueado: {texto_mensaje[:100]}"
+                            else:
+                                error_msg = f"Material {material} no puede ser procesado: {texto_mensaje[:100]}"
+                            
+                            self.driver.switch_to.default_content()
+                            raise Exception(error_msg)
+                        else:
+                            # Es un mensaje informativo
+                            print(f"  [INFO] Mensaje SAP (informativo): {texto_mensaje}")
+                            break
+                except Exception as ex_msg:
+                    # Re-lanzar si es un error de bloqueo que acabamos de crear
+                    if "bloqueado" in str(ex_msg).lower() or "no puede ser procesado" in str(ex_msg):
+                        raise
+                    pass
+            
+            # Si no hay error, material procesado correctamente
+            if not hay_error:
+                if not texto_mensaje:
+                    print(f"  [DEBUG] No se detectó mensaje (material procesado OK)")
+                
+                self.driver.switch_to.default_content()
+                print(f"[OK] Material '{material}' y Cantidad '{cantidad}' ingresados correctamente")
+                return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            error_str = str(e)
+            # Re-lanzar errores críticos de bloqueo para que se propaguen al main
+            if "bloqueado" in error_str.lower() or "no puede ser procesado" in error_str:
+                raise
+            print(f"[ERROR] Error al ingresar Material y Cantidad: {error_str}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def volver_al_primer_material(self, num_flechas: int, material_objetivo: str = None):
+        """
+        Regresa al primer material ingresado y hace doble click en ese campo.
+        Estrategia: Ctrl+Home para ir al inicio de la tabla, luego doble click
+        en el primer input de material que tenga un valor escrito.
+        """
+        try:
+            self.driver.switch_to.default_content()
+            time.sleep(0.2)
+            self.driver.switch_to.frame("ITSFRAME1")
+            time.sleep(0.5)
+
+            # Paso 1: Enviar Ctrl+Home desde el elemento activo para subir al inicio
+            print("  [INFO] Enviando Ctrl+Home para subir al inicio de la tabla...")
+            try:
+                elemento = self.driver.switch_to.active_element
+                elemento.send_keys(Keys.CONTROL + Keys.HOME)
+                time.sleep(0.8)
+            except Exception as e:
+                print(f"  [WARN] Ctrl+Home fallo: {str(e)[:80]}")
+
+            # Paso 2: Buscar el primer input de material que tenga valor
+            print("  [INFO] Buscando el primer campo de material con valor...")
+            campos_mabnr = self.driver.find_elements(
+                By.XPATH,
+                "//input[contains(@lsdata, 'MABNR')]"
+            )
+            print(f"  [DEBUG] Campos MABNR encontrados: {len(campos_mabnr)}")
+
+            primer_campo = None
+            for campo in campos_mabnr:
+                try:
+                    valor = (campo.get_attribute("value") or "").strip()
+                    if valor:
+                        primer_campo = campo
+                        campo_id = campo.get_attribute("id") or "sin-id"
+                        print(f"  [OK] Primer campo con valor '{valor}': {campo_id}")
+                        break
+                except Exception:
+                    continue
+
+            if not primer_campo:
+                print("  [WARN] No se encontro ningun campo de material con valor")
+                self.driver.switch_to.default_content()
+                return False
+
+            # Paso 3: Re-buscar el elemento justo antes del click (evita stale element)
+            # porque SAP puede haber regenerado el DOM
+            campo_id_guardado = primer_campo.get_attribute("id") or ""
+            valor_guardado = (primer_campo.get_attribute("value") or "").strip()
+            
+            time.sleep(0.3)  # Pequeña pausa antes de re-buscar
+            
+            # Re-buscar por ID si se guardó
+            primer_campo = None
+            if campo_id_guardado:
+                try:
+                    primer_campo = self.driver.find_element(By.ID, campo_id_guardado)
+                    print(f"  [INFO] Campo re-encontrado por ID: {campo_id_guardado}")
+                except Exception:
+                    pass
+            
+            # Si no funciona por ID, re-buscar por valor
+            if not primer_campo:
+                try:
+                    campos_mabnr = self.driver.find_elements(
+                        By.XPATH,
+                        "//input[contains(@lsdata, 'MABNR')]"
+                    )
+                    for campo in campos_mabnr:
+                        try:
+                            valor = (campo.get_attribute("value") or "").strip()
+                            if valor == valor_guardado:
+                                primer_campo = campo
+                                print(f"  [INFO] Campo re-encontrado por valor: {valor}")
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            
+            if not primer_campo:
+                print("  [WARN] No se pudo re-encontrar el campo antes del click")
+                self.driver.switch_to.default_content()
+                return False
+
+            # Paso 4: Doble click en ese primer campo
+            try:
+                ActionChains(self.driver).move_to_element(primer_campo).double_click(primer_campo).perform()
+                time.sleep(0.5)
+                print("  [OK] Doble click en primer material realizado")
+            except Exception as e:
+                print(f"  [WARN] Error en doble click: {str(e)[:100]}, reinentando...")
+                time.sleep(0.5)
+                try:
+                    primer_campo.click()
+                    time.sleep(0.2)
+                    primer_campo.click()
+                    print("  [OK] Doble click realizado con dos clicks separados")
+                except Exception:
+                    print(f"  [ERROR] No se pudo hacer doble click")
+                    self.driver.switch_to.default_content()
+                    return False
+
+            self.driver.switch_to.default_content()
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] volver_al_primer_material: {str(e)[:200]}")
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            return False
+    
+    def hacer_click_condiciones(self):
+        """
+        Hace click en la pestaña 'Condiciones' para continuar con el proceso
+        """
+        try:
+            print(f"\n--- Haciendo click en pestaña Condiciones ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el div de la pestaña Condiciones
+            tab_condiciones = None
+            
+            # Intentar por ID
+            try:
+                tab_condiciones = self.driver.find_element(By.ID, "M0:46:2::0:4-title")
+                print("  [OK] Pestaña Condiciones encontrada por ID")
+            except:
+                pass
+            
+            if not tab_condiciones:
+                # Intentar por texto y role="tab"
+                try:
+                    tab_condiciones = self.driver.find_element(By.XPATH, 
+                        "//div[@role='tab' and contains(text(), 'Condiciones')]")
+                    print("  [OK] Pestaña Condiciones encontrada por XPath")
+                except:
+                    pass
+            
+            if not tab_condiciones:
+                print("  [ERROR] No se encontró la pestaña Condiciones")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Hacer click en la pestaña
+            print(">> Haciendo click en Condiciones...")
+            tab_condiciones.click()
+            time.sleep(1)
+            print("  [OK] Click en Condiciones realizado")
+            
+            # Volver al contenido principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Pestaña Condiciones seleccionada")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al hacer click en Condiciones: {str(e)}")
+            return False
+    
+    def hacer_click_campo_condiciones(self):
+        """
+        Hace click en el campo de condiciones donde se ingresará el valor del portal
+        """
+        try:
+            print(f"\n--- Haciendo click en campo de condiciones ---")
+            
+            # Volver al default y entrar al iframe limpio
+            self.driver.switch_to.default_content()
+            time.sleep(1)
+            
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [ERROR] No se pudo cambiar al iframe: {str(eframe)}")
+                return False
+            
+            # Buscar el campo de condiciones (input numérico en la tabla)
+            campo_condicion = None
+            
+            # Intentar por XPath que contenga KOMV-KBETR (campo de condiciones)
+            try:
+                campo_condicion = self.driver.find_element(By.XPATH, 
+                    "//input[@ct='CBS' and contains(@lsdata, 'KOMV-KBETR') and @inputmode='numeric']")
+                print("  [OK] Campo de condiciones encontrado por XPath KOMV-KBETR")
+            except:
+                pass
+            
+            if not campo_condicion:
+                # Intentar por patrón de ID en tabla
+                try:
+                    campo_condicion = self.driver.find_element(By.XPATH, 
+                        "//input[@ct='CBS' and @inputmode='numeric' and contains(@id, 'tbl')]")
+                    print(f"  [OK] Campo de condiciones encontrado por patrón de ID")
+                except:
+                    pass
+            
+            if not campo_condicion:
+                print("  [ERROR] No se encontró el campo de condiciones")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Hacer click en el campo
+            print(">> Haciendo click en campo de condiciones...")
+            campo_condicion.click()
+            time.sleep(0.5)
+            print("  [OK] Click en campo de condiciones realizado")
+            
+            # Dejar el iframe activo para que el siguiente paso pueda escribir
+            # No volver al contenido principal todavía
+            
+            print("[OK] Campo de condiciones activado")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al hacer click en campo de condiciones: {str(e)}")
+            return False
+    
+    def ingresar_valor_condiciones(self, valor: str):
+        """
+        Ingresa un valor en el campo de condiciones de SAP
+        
+        Args:
+            valor: El valor a ingresar (sin formato, solo números)
+            
+        Returns:
+            True si se ingresó correctamente, False en caso de error
+        """
+        try:
+            print(f"[INFO] Ingresando valor en campo de condiciones: {valor}")
+            
+            # Asegurarse de estar en el iframe correcto
+            self.driver.switch_to.default_content()
+            self.driver.switch_to.frame("ITSFRAME1")
+            time.sleep(1)  # Dar tiempo para que el iframe esté completamente cargado
+            
+            # Hacer scroll hacia arriba en la tabla de condiciones por si quedó
+            # posicionada abajo (ej. después de ingresar flete manual)
+            try:
+                activo = self.driver.switch_to.active_element
+                activo.send_keys(Keys.CONTROL + Keys.HOME)
+                time.sleep(0.5)
+            except:
+                pass
+            
+            # Función helper para encontrar el campo
+            def encontrar_campo():
+                # Estrategia 1: Por ID con patrón flexible
+                try:
+                    campo = self.driver.find_element(
+                        By.XPATH,
+                        "//*[contains(@id, '[5,4]_c') and @inputmode='numeric']"
+                    )
+                    return campo
+                except:
+                    pass
+                
+                # Estrategia 2: Por lsdata que contiene KOMV-KBETR
+                try:
+                    campo = self.driver.find_element(
+                        By.XPATH,
+                        "//*[contains(@lsdata, 'KOMV-KBETR') and @inputmode='numeric']"
+                    )
+                    return campo
+                except:
+                    pass
+                
+                # Estrategia 3: Por role=textbox
+                try:
+                    campo = self.driver.find_element(
+                        By.XPATH,
+                        "//span[@role='textbox' and @inputmode='numeric' and contains(@lsdata, 'KOMV-KBETR')]"
+                    )
+                    return campo
+                except:
+                    pass
+                
+                return None
+            
+            # Buscar el campo inicial
+            campo_condiciones = encontrar_campo()
+            if not campo_condiciones:
+                raise Exception("No se pudo encontrar el campo de condiciones")
+            
+            campo_id = campo_condiciones.get_attribute('id')
+            print(f"  [OK] Campo encontrado: {campo_id}")
+            
+            # Hacer scroll al campo
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", campo_condiciones)
+            time.sleep(0.5)
+            
+            # Hacer click en el campo
+            try:
+                campo_condiciones.click()
+                print("  [OK] Click en campo realizado")
+                time.sleep(1)
+            except:
+                # Si falla, usar JavaScript
+                self.driver.execute_script("arguments[0].click();", campo_condiciones)
+                print("  [OK] Click en campo realizado con JavaScript")
+                time.sleep(1)
+            
+            # Re-encontrar el campo después del click (puede haber cambiado el DOM)
+            campo_condiciones = encontrar_campo()
+            if not campo_condiciones:
+                raise Exception("Campo no encontrado después del click")
+            
+            # Intentar ingresar el valor con múltiples métodos
+            ingreso_exitoso = False
+            
+            # Método 1: send_keys directo
+            try:
+                campo_condiciones.clear()
+                time.sleep(0.3)
+                campo_condiciones.send_keys(valor)
+                print(f"  [OK] Valor '{valor}' ingresado con send_keys")
+                ingreso_exitoso = True
+            except Exception as e1:
+                print(f"  [WARN] send_keys falló: {str(e1)}")
+                
+                # Método 2: JavaScript setAttribute + dispatchEvent
+                try:
+                    # Re-encontrar el campo por si acaso
+                    campo_condiciones = encontrar_campo()
+                    if campo_condiciones:
+                        # Establecer el valor con JavaScript
+                        self.driver.execute_script(f"arguments[0].value = '{valor}';", campo_condiciones)
+                        # Disparar evento input
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", campo_condiciones)
+                        # Disparar evento change
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", campo_condiciones)
+                        print(f"  [OK] Valor '{valor}' ingresado con JavaScript")
+                        ingreso_exitoso = True
+                except Exception as e2:
+                    print(f"  [ERROR] JavaScript setValue falló: {str(e2)}")
+            
+            if not ingreso_exitoso:
+                raise Exception("No se pudo ingresar el valor con ningún método")
+            
+            time.sleep(1)
+            
+            # Presionar Enter para confirmar (re-encontrar el campo una vez más)
+            try:
+                campo_condiciones = encontrar_campo()
+                if campo_condiciones:
+                    campo_condiciones.send_keys(Keys.ENTER)
+                    print("  [OK] Enter presionado para confirmar")
+                else:
+                    # Si no se puede re-encontrar, usar TAB como alternativa
+                    ActionChains(self.driver).send_keys(Keys.TAB).perform()
+                    print("  [OK] TAB presionado como alternativa")
+            except:
+                # Como último recurso, enviar TAB
+                ActionChains(self.driver).send_keys(Keys.TAB).perform()
+                print("  [OK] TAB presionado (fallback)")
+            
+            time.sleep(1)
+            
+            print(f"  [OK] Valor '{valor}' ingresado en campo de condiciones")
+            return True
+            
+        except Exception as e:
+            self.driver.switch_to.default_content()
+            print(f"[ERROR] Error al ingresar valor en condiciones: {str(e)}")
+            return False
+    
+    def detectar_codigo_reemplazante_portal(self):
+        """
+        Detecta si existe un modal con código reemplazante en el portal del dealer
+        El modal aparece cuando se busca un material que tiene código reemplazante
+        
+        Returns:
+            str: Código reemplazante si existe, None si no aparece el modal
+        """
+        try:
+            print("  [PORTAL] Buscando modal de código reemplazante...")
+            
+            # Esperar más tiempo para que aparezca el modal si existe
+            time.sleep(2)
+            
+            # Intentar múltiples estrategias para encontrar el span del mensaje
+            mensaje_span = None
+            texto_mensaje = ""
+            
+            # Estrategia 1: Buscar por texto "reemplazante" o "reemplazan"
+            try:
+                mensaje_span = self.driver.find_element(By.XPATH, 
+                    "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reemplazante') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reemplazan')]")
+                texto_mensaje = mensaje_span.text.strip()
+                print(f"  [PORTAL] Modal encontrado (estrategia 1): {texto_mensaje}")
+            except:
+                pass
+            
+            # Estrategia 2: Buscar por clase sapMText y verificar texto
+            if not mensaje_span:
+                try:
+                    spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")
+                    for span in spans_texto:
+                        texto = span.text.strip()
+                        if "reemplazante" in texto.lower() or "reemplazan" in texto.lower():
+                            mensaje_span = span
+                            texto_mensaje = texto
+                            print(f"  [PORTAL] Modal encontrado (estrategia 2): {texto_mensaje}")
+                            break
+                except:
+                    pass
+            
+            # Estrategia 3: Buscar por atributo data-sap-ui que contenga "text"
+            if not mensaje_span:
+                try:
+                    spans_sap = self.driver.find_elements(By.XPATH, "//span[@data-sap-ui]")
+                    for span in spans_sap:
+                        texto = span.text.strip()
+                        if "reemplazante" in texto.lower() or "reemplazan" in texto.lower():
+                            mensaje_span = span
+                            texto_mensaje = texto
+                            print(f"  [PORTAL] Modal encontrado (estrategia 3): {texto_mensaje}")
+                            break
+                except:
+                    pass
+            
+            # Estrategia 4: Buscar cualquier span visible que contenga dígitos y "material"
+            if not mensaje_span:
+                try:
+                    spans_todos = self.driver.find_elements(By.TAG_NAME, "span")
+                    for span in spans_todos:
+                        if span.is_displayed():
+                            texto = span.text.strip()
+                            if "material" in texto.lower() and re.search(r'\d{7,}', texto):
+                                mensaje_span = span
+                                texto_mensaje = texto
+                                print(f"  [PORTAL] Modal encontrado (estrategia 4): {texto_mensaje}")
+                                break
+                except:
+                    pass
+            
+            if not mensaje_span or not texto_mensaje:
+                print("  [PORTAL] No se detectó modal de código reemplazante")
+                return None
+            
+            # Extraer el número del mensaje usando regex más flexible
+            # Buscar cualquier número de 7+ dígitos en el mensaje
+            match = re.search(r'(\d{7,})', texto_mensaje)
+            if match:
+                codigo_reemplazante = match.group(1)
+                print(f"  [PORTAL] [OK] Codigo reemplazante extraido: {codigo_reemplazante}")
+                
+                # Buscar y hacer click en el boton OK/confirmacion
+                try:
+                    boton_ok = None
+                    
+                    # Estrategia 0: Buscar por ID __mbox-btn-0 (usuario lo menciona)
+                    try:
+                        boton_ok = self.driver.find_element(By.ID, "__mbox-btn-0")
+                        print("  [PORTAL] Boton encontrado por ID __mbox-btn-0 (estrategia 0)")
+                    except:
+                        pass
+                    
+                    # Estrategia 1: Buscar por texto "OK" en bdi
+                    if not boton_ok:
+                        try:
+                            boton_ok = self.driver.find_element(By.XPATH, "//bdi[text()='OK']")
+                            print("  [PORTAL] Boton OK encontrado (estrategia 1)")
+                        except:
+                            pass
+                    
+                    # Estrategia 2: Buscar button que contenga bdi con OK
+                    if not boton_ok:
+                        try:
+                            boton_ok = self.driver.find_element(By.XPATH, "//button[.//bdi[text()='OK']]")
+                            print("  [PORTAL] Boton OK encontrado (estrategia 2)")
+                        except:
+                            pass
+                    
+                    # Estrategia 3: Buscar por clase de boton en modal
+                    if not boton_ok:
+                        try:
+                            botones = self.driver.find_elements(By.CLASS_NAME, "sapMBtn")
+                            for btn in botones:
+                                if "OK" in btn.text or btn.get_attribute("title") == "OK":
+                                    boton_ok = btn
+                                    print("  [PORTAL] Boton OK encontrado (estrategia 3)")
+                                    break
+                        except:
+                            pass
+                    
+                    if boton_ok:
+                        # Hacer click en el boton
+                        time.sleep(0.3)
+                        try:
+                            boton_ok.click()
+                            print("  [PORTAL] [OK] Click en boton realizado")
+                        except:
+                            # Si falla, intentar con JavaScript
+                            self.driver.execute_script("arguments[0].click();", boton_ok)
+                            print("  [PORTAL] [OK] Click en boton realizado (JavaScript)")
+                        time.sleep(1)
+                        
+                        return codigo_reemplazante
+                    else:
+                        print(f"  [WARN] No se encontro boton, intentando ENTER")
+                        ActionChains(self.driver).send_keys(Keys.RETURN).perform()
+                        time.sleep(1)
+                        return codigo_reemplazante
+                        
+                except Exception as e_btn:
+                    print(f"  [ERROR] Error haciendo click: {str(e_btn)[:150]}")
+                    # Aun asi retornar el codigo para que se use
+                    return codigo_reemplazante
+            else:
+                print(f"  [WARN] No se pudo extraer código del mensaje: {texto_mensaje}")
+                return None
+                
+        except Exception as e:
+            print(f"  [DEBUG] Error detectando código reemplazante en portal: {str(e)[:150]}")
+            return None
+    
+    def abrir_portal_socios(self, cedula: str, material: str):
+        """
+        Abre el portal de socios en una nueva pestaña y hace login
+        Si el portal ya está abierto de una búsqueda anterior, lo reutiliza
+        
+        Args:
+            cedula: Cédula del cliente para buscar en el portal
+            material: Número de referencia del repuesto (material)
+            
+        Returns:
+            El valor obtenido del portal, o None si hay error
+        """
+        try:
+            print(f"\n--- Buscando material en Portal de Socios ---")
+            
+            # Guardar la ventana actual de SAP
+            ventana_sap = self.driver.current_window_handle
+            print(f"  [OK] Ventana SAP guardada: {ventana_sap}")
+            
+            # Verificar si ya existe una ventana del portal abierta
+            ventana_portal = None
+            portal_recien_abierto = False
+            url_portal = "https://portal-socios-auteco-portal-approuter.cfapps.us10.hana.ondemand.com"
+            
+            for ventana in self.driver.window_handles:
+                if ventana != ventana_sap:
+                    self.driver.switch_to.window(ventana)
+                    if url_portal in self.driver.current_url:
+                        ventana_portal = ventana
+                        print(f"  [OK] Portal ya abierto detectado, reutilizando...")
+                        break
+            
+            # Si no hay portal abierto, abrir uno nuevo con login completo
+            if not ventana_portal:
+                portal_recien_abierto = True
+                # Volver a SAP primero
+                self.driver.switch_to.window(ventana_sap)
+                
+                # Abrir nueva pestaña con el portal
+                print(f">> Abriendo nueva pestaña con el portal...")
+                self.driver.execute_script(f"window.open('{url_portal}/autecoPortalApp/index.html', '_blank');")
+                time.sleep(3)  # Esperar a que abra la nueva pestaña
+                
+                # Cambiar a la nueva pestaña
+                ventanas = self.driver.window_handles
+                for ventana in ventanas:
+                    if ventana != ventana_sap:
+                        self.driver.switch_to.window(ventana)
+                        print(f"  [OK] Cambiado a pestaña del portal")
+                        break
+                
+                # Esperar a que cargue la página de login
+                time.sleep(5)
+                print(f"  [OK] Portal abierto, esperando formulario de login...")
+                
+                # Buscar el campo de correo
+                try:
+                    campo_email = self.driver.find_element(By.ID, "j_username")
+                    print("  [OK] Campo de correo encontrado")
+                    
+                    # Escribir el correo
+                    campo_email.click()
+                    time.sleep(0.3)
+                    campo_email.clear()
+                    campo_email.send_keys("daniela.munoz@andesbpo.com")
+                    time.sleep(0.5)
+                    print("  [OK] Correo ingresado")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo ingresar el correo: {str(e)}")
+                    return None
+                
+                # Buscar el campo de contraseña
+                try:
+                    campo_password = self.driver.find_element(By.ID, "j_password")
+                    print("  [OK] Campo de contraseña encontrado")
+                    
+                    # Escribir la contraseña
+                    campo_password.click()
+                    time.sleep(0.3)
+                    campo_password.clear()
+                    campo_password.send_keys("Andes2025.")
+                    time.sleep(0.5)
+                    print("  [OK] Contraseña ingresada")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo ingresar la contraseña: {str(e)}")
+                    return None
+                
+                # Hacer click en el botón de iniciar sesión
+                try:
+                    boton_login = self.driver.find_element(By.ID, "logOnFormSubmit")
+                    print("  [OK] Botón de login encontrado")
+                    
+                    boton_login.click()
+                    time.sleep(5)  # Esperar a que cargue después del login
+                    print("  [OK] Login realizado, esperando carga de la página principal...")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click en botón de login: {str(e)}")
+                    return None
+                
+                # Hacer click en la imagen de Auteco para continuar
+                try:
+                    imagen_auteco = self.driver.find_element(By.ID, "__button0-img")
+                    print("  [OK] Imagen de Auteco encontrada")
+                    
+                    # Hacer click en la imagen (o en su contenedor button)
+                    try:
+                        # Intentar hacer click en el botón padre de la imagen
+                        boton_auteco = imagen_auteco.find_element(By.XPATH, "..")
+                        boton_auteco.click()
+                        print("  [OK] Click en botón de Auteco realizado")
+                    except:
+                        # Si no funciona el padre, hacer click directo en la imagen
+                        imagen_auteco.click()
+                        print("  [OK] Click en imagen de Auteco realizado")
+                    
+                    time.sleep(3)  # Esperar a que cargue después del click
+                except Exception as e:
+                    print(f"  [WARN] No se pudo hacer click en imagen de Auteco (ignorado): {str(e)[:80]}")
+                    time.sleep(2)  # Esperar igual por si el portal cargó
+            
+            # Si el portal fue recién abierto, navegar por Pedidos -> Paso 2 -> Paso 3
+            # Si el portal ya estaba abierto, saltamos directamente a la búsqueda del material
+            if portal_recien_abierto:
+                # Hacer click en el menú "Pedidos"
+                try:
+                    span_pedidos = self.driver.find_element(By.XPATH, 
+                        "//span[@class='sapMText sapTntNavLIText sapMTextNoWrap' and text()='Pedidos']")
+                    print("  [OK] Menú 'Pedidos' encontrado")
+                    
+                    span_pedidos.click()
+                    time.sleep(2)  # Esperar a que cargue la sección de pedidos
+                    print("  [OK] Click en 'Pedidos' realizado")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click en 'Pedidos': {str(e)}")
+                    return None
+                
+                # Hacer click en el botón (puede ser un botón de acción o filtro)
+                try:
+                    boton_bdi = self.driver.find_element(By.ID, "__button2-BDI-content")
+                    print("  [OK] Botón de acción encontrado")
+                    
+                    # Intentar hacer click directamente
+                    try:
+                        boton_bdi.click()
+                        print("  [OK] Click en botón realizado")
+                    except:
+                        # Si no funciona, intentar en el botón padre
+                        boton_padre = boton_bdi.find_element(By.XPATH, "..")
+                        boton_padre.click()
+                        print("  [OK] Click en botón padre realizado")
+                    
+                    time.sleep(2)  # Esperar a que cargue después del click
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click en botón: {str(e)}")
+                    return None
+                
+                # Escribir "R" en el campo de ventas y presionar Enter
+                try:
+                    campo_ventas = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--comboVentas-inner")
+                    print("  [OK] Campo de ventas encontrado")
+                    
+                    campo_ventas.click()
+                    time.sleep(0.3)
+                    campo_ventas.clear()
+                    campo_ventas.send_keys("R")
+                    time.sleep(0.5)
+                    print("  [OK] Letra 'R' escrita en campo de ventas")
+                    
+                    # Presionar Enter
+                    campo_ventas.send_keys(Keys.ENTER)
+                    time.sleep(5)  # Esperar más tiempo a que cargue la tabla completa
+                    print("  [OK] Enter presionado en campo de ventas, esperando carga completa...")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo escribir en campo de ventas: {str(e)}")
+                    return None
+                
+                # Buscar por cédula en el campo de búsqueda
+                try:
+                    # Esperar explícitamente a que el busy indicator desaparezca
+                    print("  [INFO] Esperando a que desaparezca el indicador de carga...")
+                    try:
+                        WebDriverWait(self.driver, 15).until(
+                            EC.invisibility_of_element_located((By.ID, "container-PortalApp---Pedidos--page-busyIndicator"))
+                        )
+                        print("  [OK] Indicador de carga desaparecido")
+                    except:
+                        print("  [WARN] Timeout esperando indicador, continuando...")
+                    
+                    # Esperar a que el campo de búsqueda sea clickeable
+                    campo_busqueda = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.ID, "container-PortalApp---Pedidos--searchField-I"))
+                    )
+                    print("  [OK] Campo de búsqueda encontrado y clickeable")
+                    
+                    campo_busqueda.click()
+                    time.sleep(0.3)
+                    campo_busqueda.clear()
+                    campo_busqueda.send_keys("550005491")
+                    time.sleep(1.5)  # Esperar a que se filtren los resultados
+                    print("  [OK] Valor '550005491' escrito en campo de búsqueda")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo escribir en campo de búsqueda: {str(e)}")
+                    return None
+                
+                # Hacer doble click en la celda del resultado (TODO MOTOS SAS PTO BOYACA)
+                try:
+                    # Buscar la celda por el texto contenido o por la clase
+                    celda_resultado = None
+                    
+                    # Intentar buscar por XPath que contenga el texto específico
+                    try:
+                        celda_resultado = self.driver.find_element(By.XPATH, 
+                            "//td[contains(@class, 'sapMListTblCell')]//span[contains(@class, 'sapMText')]")
+                        print(f"  [OK] Celda de resultado encontrada")
+                    except:
+                        # Si no encuentra por texto, buscar por la primera celda visible en la tabla
+                        celda_resultado = self.driver.find_element(By.XPATH, 
+                            "//td[contains(@class, 'sapMListTblCell') and contains(@id, '_cell0')]")
+                        print(f"  [OK] Celda de resultado encontrada (por ID)")
+                    
+                    # Hacer doble click en la celda
+                    ActionChains(self.driver).double_click(celda_resultado).perform()
+                    print("  [OK] Doble click en resultado realizado, esperando carga...")
+                    time.sleep(6)  # Esperar más tiempo a que abra el detalle completamente
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer doble click en resultado: {str(e)}")
+                    return None
+                
+                # Hacer click en el botón "Paso 2"
+                try:
+                    print("  [INFO] Buscando botón 'Paso 2'...")
+                    time.sleep(1)  # Pausa adicional antes de buscar
+                    
+                    # Intentar encontrar el botón directamente por su ID completo
+                    boton_paso2 = None
+                    try:
+                        # Probar con diferentes IDs posibles del botón
+                        posibles_ids = [
+                            "container-PortalApp---Pedidos--WS_TipoVenta-nextButton",
+                            "container-PortalApp---Pedidos--WS_TipoVenta-nextButton-inner"
+                        ]
+                        for btn_id in posibles_ids:
+                            try:
+                                boton_paso2 = self.driver.find_element(By.ID, btn_id)
+                                print(f"  [OK] Botón 'Paso 2' encontrado por ID: {btn_id}")
+                                break
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Si no encontró el botón por ID, buscar por el BDI y navegar al ancestro
+                    if not boton_paso2:
+                        elemento_bdi = None
+                        try:
+                            elemento_bdi = self.driver.find_element(By.XPATH, "//bdi[contains(text(), 'Paso 2')]")
+                            print("  [OK] Elemento BDI 'Paso 2' encontrado por texto")
+                        except:
+                            elemento_bdi = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--WS_TipoVenta-nextButton-BDI-content")
+                            print("  [OK] Elemento BDI 'Paso 2' encontrado por ID")
+                        
+                        # Buscar el botón padre
+                        boton_paso2 = elemento_bdi.find_element(By.XPATH, "./ancestor::button")
+                        print(f"  [OK] Botón padre encontrado vía BDI: {boton_paso2.get_attribute('id')}")
+                    
+                    # Verificar propiedades del botón
+                    print(f"  [DEBUG] ID del botón: {boton_paso2.get_attribute('id')}")
+                    print(f"  [DEBUG] Botón visible: {boton_paso2.is_displayed()}")
+                    print(f"  [DEBUG] Botón habilitado: {boton_paso2.is_enabled()}")
+                    print(f"  [DEBUG] Clases del botón: {boton_paso2.get_attribute('class')}")
+                    
+                    # Hacer scroll al botón
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", boton_paso2)
+                    time.sleep(1)
+                    
+                    # Intentar múltiples métodos de click
+                    click_exitoso = False
+                    
+                    # Método 1: ActionChains click
+                    try:
+                        ActionChains(self.driver).move_to_element(boton_paso2).click().perform()
+                        print("  [OK] Click en 'Paso 2' con ActionChains")
+                        click_exitoso = True
+                    except Exception as e1:
+                        print(f"  [WARN] ActionChains falló: {str(e1)}")
+                        
+                        # Método 2: Click normal
+                        try:
+                            boton_paso2.click()
+                            print("  [OK] Click normal en 'Paso 2'")
+                            click_exitoso = True
+                        except Exception as e2:
+                            print(f"  [WARN] Click normal falló: {str(e2)}")
+                            
+                            # Método 3: JavaScript click
+                            try:
+                                self.driver.execute_script("arguments[0].click();", boton_paso2)
+                                print("  [OK] Click JavaScript en 'Paso 2'")
+                                click_exitoso = True
+                            except Exception as e3:
+                                print(f"  [ERROR] JavaScript click falló: {str(e3)}")
+                    
+                    if not click_exitoso:
+                        raise Exception("No se pudo hacer click en 'Paso 2' con ningún método")
+                    
+                    time.sleep(5)  # Esperar a que cargue la siguiente pantalla
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click en botón 'Paso 2': {str(e)}")
+                    return None
+                
+                # Hacer click en el botón "Paso 3"
+                try:
+                    print("  [INFO] Buscando botón 'Paso 3'...")
+                    time.sleep(1)  # Pausa adicional antes de buscar
+                    
+                    # Intentar encontrar el botón directamente por su ID completo
+                    boton_paso3 = None
+                    try:
+                        # Probar con diferentes IDs posibles del botón
+                        posibles_ids = [
+                            "container-PortalApp---Pedidos--WS_DatosGrles-nextButton",
+                            "container-PortalApp---Pedidos--WS_DatosGrles-nextButton-inner"
+                        ]
+                        for btn_id in posibles_ids:
+                            try:
+                                boton_paso3 = self.driver.find_element(By.ID, btn_id)
+                                print(f"  [OK] Botón 'Paso 3' encontrado por ID: {btn_id}")
+                                break
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Si no encontró el botón por ID, buscar por el BDI y navegar al ancestro
+                    if not boton_paso3:
+                        # Esperar hasta 15 segundos intentando encontrar el elemento BDI
+                        elemento_bdi = None
+                        for intento in range(15):
+                            try:
+                                # Estrategia 1: Por texto
+                                elemento_bdi = self.driver.find_element(By.XPATH, "//bdi[contains(text(), 'Paso 3')]")
+                                print("  [OK] Elemento BDI 'Paso 3' encontrado por texto")
+                                break
+                            except:
+                                pass
+                            
+                            try:
+                                # Estrategia 2: Por ID del BDI
+                                elemento_bdi = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--WS_DatosGrles-nextButton-BDI-content")
+                                print("  [OK] Elemento BDI 'Paso 3' encontrado por ID")
+                                break
+                            except:
+                                pass
+                            
+                            time.sleep(1)
+                        
+                        if not elemento_bdi:
+                            raise Exception("No se pudo encontrar el elemento BDI Paso 3 después de 15 segundos")
+                        
+                        # Buscar el botón padre
+                        boton_paso3 = elemento_bdi.find_element(By.XPATH, "./ancestor::button")
+                        print(f"  [OK] Botón padre encontrado vía BDI: {boton_paso3.get_attribute('id')}")
+                    
+                    # Verificar propiedades del botón
+                    print(f"  [DEBUG] ID del botón: {boton_paso3.get_attribute('id')}")
+                    print(f"  [DEBUG] Botón visible: {boton_paso3.is_displayed()}")
+                    print(f"  [DEBUG] Botón habilitado: {boton_paso3.is_enabled()}")
+                    print(f"  [DEBUG] Clases del botón: {boton_paso3.get_attribute('class')}")
+                    
+                    # Hacer scroll al botón
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", boton_paso3)
+                    time.sleep(1)
+                    
+                    # Intentar múltiples métodos de click
+                    click_exitoso = False
+                    
+                    # Método 1: ActionChains click
+                    try:
+                        ActionChains(self.driver).move_to_element(boton_paso3).click().perform()
+                        print("  [OK] Click en 'Paso 3' con ActionChains")
+                        click_exitoso = True
+                    except Exception as e1:
+                        print(f"  [WARN] ActionChains falló: {str(e1)}")
+                        
+                        # Método 2: Click normal
+                        try:
+                            boton_paso3.click()
+                            print("  [OK] Click normal en 'Paso 3'")
+                            click_exitoso = True
+                        except Exception as e2:
+                            print(f"  [WARN] Click normal falló: {str(e2)}")
+                            
+                            # Método 3: JavaScript click
+                            try:
+                                self.driver.execute_script("arguments[0].click();", boton_paso3)
+                                print("  [OK] Click JavaScript en 'Paso 3'")
+                                click_exitoso = True
+                            except Exception as e3:
+                                print(f"  [ERROR] JavaScript click falló: {str(e3)}")
+                    
+                    if not click_exitoso:
+                        raise Exception("No se pudo hacer click en 'Paso 3' con ningún método")
+                    
+                    print("  [INFO] Esperando a que cargue la pantalla del Paso 3...")
+                    time.sleep(8)  # Esperar más tiempo a que cargue completamente
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click en botón 'Paso 3': {str(e)}")
+                    return None
+            else:
+                # Portal ya estaba abierto, reutilizando sesión
+                print("  [INFO] Portal ya abierto, saltando navegación y reutilizando sesión...")
+            
+            # Buscar el material en el input de búsqueda (esto se ejecuta siempre)
+            try:
+                print(f"  [INFO] Buscando material '{material}' en el portal...")
+                
+                # Intentar múltiples estrategias para encontrar el input
+                input_busqueda_mat = None
+                
+                # Estrategia 1: Por ID completo
+                print("  [INFO] Intentando buscar input por ID...")
+                for intento in range(10):
+                    try:
+                        input_busqueda_mat = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--searchFieldMat-I")
+                        print("  [OK] Input de búsqueda encontrado por ID")
+                        break
+                    except:
+                        print(f"  [DEBUG] Intento {intento+1}/10 - Input no encontrado aún, esperando...")
+                        time.sleep(1)
+                
+                # Estrategia 2: Por atributos del input
+                if not input_busqueda_mat:
+                    print("  [INFO] Intentando buscar input por atributos...")
+                    try:
+                        input_busqueda_mat = self.driver.find_element(
+                            By.XPATH,
+                            "//input[@type='search' and @placeholder='Buscar en la lista']"
+                        )
+                        print("  [OK] Input de búsqueda encontrado por placeholder")
+                    except:
+                        pass
+                
+                # Estrategia 3: Por clase sapMSFI
+                if not input_busqueda_mat:
+                    print("  [INFO] Intentando buscar input por clase...")
+                    try:
+                        inputs_search = self.driver.find_elements(By.CLASS_NAME, "sapMSFI")
+                        if len(inputs_search) > 0:
+                            # Buscar el que está visible y en la sección de materiales
+                            for inp in inputs_search:
+                                if inp.is_displayed() and 'Mat' in inp.get_attribute('id'):
+                                    input_busqueda_mat = inp
+                                    print(f"  [OK] Input encontrado por clase: {input_busqueda_mat.get_attribute('id')}")
+                                    break
+                    except:
+                        pass
+                
+                if not input_busqueda_mat:
+                    raise Exception("No se pudo encontrar el input de búsqueda de material con ninguna estrategia")
+                
+                # Hacer scroll al input
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", input_busqueda_mat)
+                time.sleep(1)
+                
+                # Verificar que el input esté visible y habilitado
+                print(f"  [DEBUG] Input visible: {input_busqueda_mat.is_displayed()}")
+                print(f"  [DEBUG] Input habilitado: {input_busqueda_mat.is_enabled()}")
+                
+                # Intentar escribir con múltiples métodos
+                escritura_exitosa = False
+                error_intercepciones = False
+                
+                # Método 1: Click y send_keys normal
+                try:
+                    input_busqueda_mat.click()
+                    time.sleep(0.5)
+                    input_busqueda_mat.clear()
+                    time.sleep(0.3)
+                    input_busqueda_mat.send_keys(material)
+                    print(f"  [OK] Material '{material}' escrito con método normal")
+                    escritura_exitosa = True
+                except Exception as e1:
+                    print(f"  [WARN] Método normal falló: {str(e1)}")
+                    
+                    # Verificar si es por intercepciones
+                    if "element click intercepted" in str(e1):
+                        error_intercepciones = True
+                        print(f"  [WARN] Error de intercepciones de elemento detectado")
+                    
+                    # Método 2: JavaScript setValue
+                    try:
+                        self.driver.execute_script(f"arguments[0].value = '{material}';", input_busqueda_mat)
+                        # Disparar evento input para que se procese el cambio
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", input_busqueda_mat)
+                        print(f"  [OK] Material '{material}' escrito con JavaScript")
+                        escritura_exitosa = True
+                    except Exception as e2:
+                        print(f"  [ERROR] JavaScript setValue falló: {str(e2)}")
+                
+                if not escritura_exitosa:
+                    if error_intercepciones:
+                        raise Exception("element click intercepted: No se pudo hacer click en campo de búsqueda del portal")
+                    else:
+                        raise Exception("No se pudo escribir el material con ningún método")
+                
+                print(f"  [OK] Material '{material}' escrito en búsqueda")
+                time.sleep(2)  # Esperar a que cargue el resultado
+                
+            except Exception as e:
+                print(f"  [ERROR] No se pudo buscar el material: {str(e)}")
+                return None
+            
+            # Hacer click en el span que muestra el código
+            try:
+                print(f"  [INFO] Buscando resultado con código del material...")
+                
+                # Buscar el span que contiene "CODIGO: [material]"
+                span_codigo = self.driver.find_element(By.XPATH, f"//span[contains(text(), 'CODIGO: {material}')]")
+                print(f"  [OK] Span con código encontrado")
+                
+                # Hacer scroll y click
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span_codigo)
+                time.sleep(0.5)
+                
+                # Intentar click
+                try:
+                    span_codigo.click()
+                    print("  [OK] Click en span del código realizado")
+                except:
+                    # Si falla, usar JavaScript
+                    self.driver.execute_script("arguments[0].click();", span_codigo)
+                    print("  [OK] Click en span del código realizado con JavaScript")
+                
+                time.sleep(3)  # Esperar a que cargue el detalle o aparezca modal
+                
+                # AQUÍ es donde aparece el modal de código reemplazante
+                print(f"  [INFO] Verificando si aparece modal de código reemplazante...")
+                codigo_reemplazante = self.detectar_codigo_reemplazante_portal()
+                
+                if codigo_reemplazante:
+                    # Hay un código reemplazante - reintentar búsqueda con el nuevo código
+                    print(f"\n>> ==========================================")
+                    print(f">> PORTAL: Material reemplazante detectado")
+                    print(f">> Material Original: {material}")
+                    print(f">> Material Reemplazante: {codigo_reemplazante}")
+                    print(f">> ==========================================")
+                    print(f"   Volviendo a buscar y haciendo click en el material reemplazante...")
+                    
+                    # Actualizar la variable material
+                    material = codigo_reemplazante
+                    
+                    # Buscar el material reemplazante
+                    try:
+                        # Buscar el input de búsqueda nuevamente
+                        input_busqueda_reintentar = None
+                        try:
+                            input_busqueda_reintentar = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--searchFieldMat-I")
+                        except:
+                            try:
+                                input_busqueda_reintentar = self.driver.find_element(By.XPATH, "//input[@type='search' and @placeholder='Buscar en la lista']")
+                            except:
+                                pass
+                        
+                        if not input_busqueda_reintentar:
+                            print(f"  [ERROR] No se pudo encontrar input de búsqueda para reintentar")
+                            return None
+                        
+                        # Scroll al input
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", input_busqueda_reintentar)
+                        time.sleep(0.8)
+                        
+                        # Intentar hacer click - si falla por elemento interceptado, usar JavaScript
+                        try:
+                            input_busqueda_reintentar.click()
+                            print(f"  [OK] Click en campo de busqueda realizado")
+                        except Exception as e_click:
+                            if "element click intercepted" in str(e_click):
+                                print(f"  [WARN] Click interceptado, usando JavaScript para enfoque...")
+                                self.driver.execute_script("arguments[0].focus();", input_busqueda_reintentar)
+                                time.sleep(0.3)
+                            else:
+                                raise
+                        
+                        time.sleep(0.3)
+                        
+                        # Limpiar campo con JavaScript para evitar problemas
+                        self.driver.execute_script("arguments[0].value = '';", input_busqueda_reintentar)
+                        time.sleep(0.2)
+                        
+                        # Simular eventos de change para que SAP se entere
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('input', {bubbles: true}));", input_busqueda_reintentar)
+                        time.sleep(0.3)
+                        
+                        print(f"   Escribiendo codigo reemplazante: {material}")
+                        try:
+                            input_busqueda_reintentar.send_keys(material)
+                            print(f"  [OK] Material reemplazante escrito")
+                        except:
+                            self.driver.execute_script(f"arguments[0].value = '{material}';", input_busqueda_reintentar)
+                            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", input_busqueda_reintentar)
+                            print(f"  [OK] Material reemplazante escrito con JavaScript")
+                        
+                        time.sleep(2)  # Esperar a que cargue el resultado
+                        
+                        # Buscar y hacer click en el nuevo span con el código reemplazante
+                        print(f"  [INFO] Buscando resultado con código reemplazante...")
+                        span_codigo_nuevo = self.driver.find_element(By.XPATH, f"//span[contains(text(), 'CODIGO: {material}')]")
+                        print(f"  [OK] Span con código reemplazante encontrado")
+                        
+                        # Scroll y click
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span_codigo_nuevo)
+                        time.sleep(0.5)
+                        
+                        try:
+                            span_codigo_nuevo.click()
+                            print("  [OK] Click en span del código reemplazante realizado")
+                        except:
+                            self.driver.execute_script("arguments[0].click();", span_codigo_nuevo)
+                            print("  [OK] Click en span del código reemplazante realizado con JavaScript")
+                        
+                        time.sleep(3)  # Esperar a que cargue el detalle
+                        
+                        # Verificar si hay otro modal (poco probable)
+                        codigo_reemplazante_2do = self.detectar_codigo_reemplazante_portal()
+                        if codigo_reemplazante_2do:
+                            print(f"  [WARN] Segundo código reemplazante detectado: {codigo_reemplazante_2do}")
+                            print(f"  [NOTE] Usando el primer reemplazo: {material}")
+                        
+                    except Exception as e_reintentar:
+                        print(f"  [ERROR] Error durante reintento con material reemplazante: {str(e_reintentar)}")
+                        return None
+                else:
+                    print(f"  [INFO] No se detectó modal, continuando con material original: {material}")
+                
+            except Exception as e:
+                print(f"  [ERROR] No se pudo hacer click en el código: {str(e)}")
+                return None
+            
+            # Extraer los valores de precio sin IVA y con IVA
+            try:
+                print(f"  [INFO] Extrayendo precios del portal...")
+                
+                # Buscar todos los spans de texto para encontrar los precios
+                spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")
+                
+                precio_sin_iva_texto = None
+                precio_con_iva_texto = None
+                
+                for i, span in enumerate(spans_texto):
+                    texto = span.text.strip()
+                    # Buscar el precio que contenga "COP"
+                    if "COP" in texto and "$" in texto:
+                        # Verificar si es el primero o segundo precio encontrado
+                        if precio_sin_iva_texto is None:
+                            precio_sin_iva_texto = texto
+                            print(f"  [OK] Precio sin IVA encontrado: {precio_sin_iva_texto}")
+                        elif precio_con_iva_texto is None:
+                            precio_con_iva_texto = texto
+                            print(f"  [OK] Precio con IVA encontrado: {precio_con_iva_texto}")
+                            break  # Ya encontramos los dos precios
+                
+                if not precio_sin_iva_texto:
+                    raise Exception("No se pudo encontrar el precio sin IVA")
+                
+                if not precio_con_iva_texto:
+                    print(f"  [WARN] No se encontró precio con IVA, continuando sin validación")
+                
+                # Limpiar el valor sin IVA (eliminar $, puntos, COP, espacios)
+                import re
+                precio_sin_iva_limpio = re.sub(r'[^\d]', '', precio_sin_iva_texto)
+                print(f"  [OK] Precio sin IVA limpio: {precio_sin_iva_limpio}")
+                
+                # Si tenemos precio con IVA, validar que sea mayor a 150000
+                if precio_con_iva_texto:
+                    precio_con_iva_limpio = re.sub(r'[^\d]', '', precio_con_iva_texto)
+                    precio_con_iva_valor = int(precio_con_iva_limpio)
+                    print(f"  [INFO] Validando precio con IVA: {precio_con_iva_valor} COP")
+                    
+                    if precio_con_iva_valor < 150000:
+                        print(f"  [WARN] Precio con IVA ({precio_con_iva_valor}) es menor a 150,000 COP")
+                        print(f"  [WARN] Se requiere proceso adicional (no implementado aún)")
+                    else:
+                        print(f"  [OK] Precio con IVA ({precio_con_iva_valor}) es válido (>= 150,000)")
+                
+            except Exception as e:
+                print(f"  [ERROR] No se pudieron extraer los precios: {str(e)}")
+                return None
+            
+            # Volver a SAP pero SIN cerrar el portal (para reutilizarlo en siguiente material)
+            try:
+                print(f"  [INFO] Volviendo a SAP (portal permanece abierto)...")
+                self.driver.switch_to.window(ventana_sap)  # Volver a SAP
+                
+                # Asegurarse de estar en el iframe correcto de SAP
+                self.driver.switch_to.default_content()
+                self.driver.switch_to.frame("ITSFRAME1")
+                
+                print(f"  [OK] Vuelta a SAP completada")
+            except Exception as e:
+                print(f"  [WARN] Error al volver a SAP: {str(e)}")
+                # Intentar volver a SAP de todas formas
+                try:
+                    self.driver.switch_to.window(ventana_sap)
+                    self.driver.switch_to.default_content()
+                    self.driver.switch_to.frame("ITSFRAME1")
+                except:
+                    pass
+            
+            print("[OK] Portal de Socios procesado exitosamente")
+            print(f"[INFO] Valor sin IVA: {precio_sin_iva_limpio}")
+            print(f"[INFO] Valor con IVA: {precio_con_iva_valor}")
+            
+            # Retornar diccionario con información completa
+            return {
+                'precio_sin_iva': precio_sin_iva_limpio,
+                'precio_con_iva': precio_con_iva_valor if precio_con_iva_texto else None,
+                'es_mayor_150k': precio_con_iva_valor >= 150000 if precio_con_iva_texto else True
+            }
+            
+        except Exception as e:
+            print(f"[ERROR] Error al abrir portal de socios: {str(e)}")
+            # Intentar volver a la ventana de SAP
+            try:
+                self.driver.switch_to.window(ventana_sap)
+            except:
+                pass
+            return None
+    
+    def hacer_click_posicion_siguiente(self):
+        """
+        Hace click en el botón 'Posición siguiente' (Mayús+F7)
+        para moverse al siguiente material en SAP VA01
+        
+        Returns:
+            bool: True si el click fue exitoso, False si no
+        """
+        try:
+            print("\n[INFO] Haciendo click en botón 'Posición siguiente'...")
+            
+            # Asegurarse de estar en el iframe
+            self.driver.switch_to.default_content()
+            time.sleep(0.3)
+            self.driver.switch_to.frame("ITSFRAME1")
+            time.sleep(0.5)
+            
+            boton = None
+            # Estrategia 1: Buscar por título "Posición siguiente"
+            for xpath in [
+                "//div[@role='button' and contains(@title, 'siguiente')]",
+                "//div[@role='button' and contains(@id, 'btn[19]')]",
+                "//div[@role='button' and contains(@lsdata, 'Posici')]",
+                "//div[contains(@lsdata, 'SHIFT_F7') and @role='button']",
+            ]:
+                try:
+                    boton = self.driver.find_element(By.XPATH, xpath)
+                    print(f"  [OK] Botón encontrado con: {xpath}")
+                    break
+                except:
+                    continue
+            
+            if not boton:
+                # Fallback: enviar Shift+F7 directamente
+                print("  [WARN] Botón no encontrado, enviando Shift+F7...")
+                elemento_activo = self.driver.switch_to.active_element
+                elemento_activo.send_keys(Keys.SHIFT + Keys.F7)
+                time.sleep(2)
+                self.driver.switch_to.default_content()
+                print("[OK] Shift+F7 enviado para posición siguiente")
+                return True
+            
+            # Hacer scroll al botón
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", boton)
+            time.sleep(0.5)
+            
+            # Intentar click
+            try:
+                boton.click()
+                print("  [OK] Click realizado en botón 'Posición siguiente'")
+            except:
+                try:
+                    self.driver.execute_script("arguments[0].click();", boton)
+                    print("  [OK] Click con JavaScript realizado en botón 'Posición siguiente'")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click: {str(e)[:100]}")
+                    self.driver.switch_to.default_content()
+                    return False
+            
+            # Esperar a que cambie la posición
+            time.sleep(2)
+            
+            self.driver.switch_to.default_content()
+            print("[OK] Posición siguiente activada correctamente")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Error al hacer click en 'Posición siguiente': {str(e)[:200]}")
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            return False
+    
+    def obtener_tarifa_flete(self, ciudad, ruta_excel=None):
+        """
+        Obtiene la tarifa de flete estándar para una ciudad desde el Excel de tarifas
+        
+        Args:
+            ciudad (str): Nombre de la ciudad a buscar
+            ruta_excel (str): Ruta al archivo Excel de tarifas (opcional, se busca automáticamente)
+            
+        Returns:
+            int: Valor del flete sin IVA, None si no se encuentra
+        """
+        try:
+            print(f"\n[INFO] Buscando tarifa de flete para ciudad: {ciudad}")
+            
+            import pandas as pd
+            import glob
+            import os
+            
+            # Si no se proporciona ruta, buscar el archivo automáticamente
+            if not ruta_excel:
+                downloads_path = r"C:\Users\1018232653\Downloads"
+                patron_busqueda = os.path.join(downloads_path, "TARIFAS*.xlsx")
+                archivos_encontrados = glob.glob(patron_busqueda)
+                
+                if not archivos_encontrados:
+                    print(f"  [ERROR] No se encontró archivo de tarifas en {downloads_path}")
+                    print(f"  [INFO] Se buscó con patrón: TARIFAS*.xlsx")
+                    return None
+                
+                # Usar el primer archivo encontrado
+                ruta_excel = archivos_encontrados[0]
+                try:
+                    print(f"  [OK] Archivo de tarifas encontrado")
+                except:
+                    pass  # Ignorar errores de codificación al imprimir
+            
+            # Leer el Excel de tarifas
+            df = pd.read_excel(ruta_excel)
+            print(f"  [OK] Excel de tarifas cargado: {len(df)} registros")
+            
+            # Buscar la columna de ciudad (puede tener varios nombres)
+            # La columna se llama "ZONA DE TRANSPORTE" pero puede variar
+            columna_ciudad = None
+            for col in df.columns:
+                col_lower = col.lower()
+                # Prioridad 1: "ZONA DE TRANSPORTE" o variaciones
+                if 'zona' in col_lower and 'transporte' in col_lower:
+                    columna_ciudad = col
+                    break
+                # Prioridad 2: Solo "zona"
+                if 'zona' in col_lower:
+                    columna_ciudad = col
+                    break
+            
+            # Si no se encontró con "zona", buscar otras variantes
+            if not columna_ciudad:
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if any(palabra in col_lower for palabra in ['ciudad', 'población', 'poblacion', 'municipio']):
+                        columna_ciudad = col
+                        break
+            
+            if not columna_ciudad:
+                print(f"  [ERROR] No se encontró columna de ciudad/zona en el Excel")
+                print(f"  [INFO] Columnas disponibles: {list(df.columns)}")
+                return None
+            
+            # Buscar la columna de tarifa
+            columna_tarifa = None
+            for col in df.columns:
+                col_lower = col.lower()
+                if 'tarifa' in col_lower and 'ecommerce' in col_lower:
+                    columna_tarifa = col
+                    break
+            
+            if not columna_tarifa:
+                print(f"  [ERROR] No se encontró columna 'Tarifa Estandar Ecommerce' en el Excel")
+                return None
+            
+            try:
+                print(f"  [INFO] Usando columnas: Ciudad='{columna_ciudad}', Tarifa='{columna_tarifa}'")
+            except UnicodeEncodeError:
+                print(f"  [INFO] Columnas encontradas en el Excel")
+            
+            # Normalizar y limpiar la entrada de ciudad
+            import re
+            import unicodedata
+            
+            def normalizar_texto(texto):
+                """
+                Normaliza texto removiendo acentos y caracteres especiales
+                para comparación robusta que ignore tildes y encoding
+                """
+                if not texto:
+                    return ""
+                # Normalizar a NFD (descomponer caracteres con acento)
+                texto_nfd = unicodedata.normalize('NFD', str(texto))
+                # Remover marcas diacríticas (tildes, acentos)
+                texto_sin_tildes = ''.join(char for char in texto_nfd if unicodedata.category(char) != 'Mn')
+                # Normalizar a NFC (recomponer caracteres)
+                return unicodedata.normalize('NFC', texto_sin_tildes).strip().upper()
+            
+            ciudad_original = ciudad
+            ciudad_limpia = ciudad.strip()
+            
+            # Separar por diferentes delimitadores comunes (coma, guión, espacio)
+            # Reemplazar caracteres especiales por espacios
+            ciudad_limpia = re.sub(r'[,\-_/\\]+', ' ', ciudad_limpia)
+            # Dividir en palabras
+            palabras = [p.strip() for p in ciudad_limpia.split() if len(p.strip()) > 2]  # Ignorar palabras muy cortas
+            
+            try:
+                print(f"  [INFO] Palabras extraídas: {palabras}")
+            except UnicodeEncodeError:
+                print(f"  [INFO] Buscando ciudad en Excel...")
+            
+            df_filtrado = None
+            palabra_encontrada = None
+            
+            # Estrategia 1: Búsqueda exacta con el texto completo (CON normalización de tildes)
+            ciudad_normalizada = normalizar_texto(ciudad_limpia)
+            df_normalizadas = df[columna_ciudad].apply(normalizar_texto)
+            df_filtrado = df[df_normalizadas == ciudad_normalizada]
+            if not df_filtrado.empty:
+                print(f"  [OK] Encontrado con búsqueda exacta (normalizada)")
+                palabra_encontrada = ciudad_limpia
+            
+            # Estrategia 2: Probar cada palabra individualmente (exacta, CON normalización)
+            if df_filtrado is None or df_filtrado.empty:
+                for palabra in palabras:
+                    palabra_norm = normalizar_texto(palabra)
+                    try:
+                        print(f"  [INFO] Probando palabra exacta normalizada: '{palabra}'")
+                    except:
+                        pass
+                    df_filtrado = df[df_normalizadas == palabra_norm]
+                    if not df_filtrado.empty:
+                        palabra_encontrada = palabra
+                        print(f"  [OK] Encontrado con palabra exacta (normalizada)")
+                        break
+            
+            # Estrategia 3: Búsqueda parcial - cada palabra contenida en las ciudades del Excel (CON normalización)
+            if df_filtrado is None or df_filtrado.empty:
+                for palabra in palabras:
+                    palabra_norm = normalizar_texto(palabra)
+                    try:
+                        print(f"  [INFO] Probando palabra parcial normalizada: '{palabra}'")
+                    except:
+                        pass
+                    df_temp = df[df_normalizadas.str.contains(palabra_norm, na=False, regex=False)]
+                    if not df_temp.empty:
+                        df_filtrado = df_temp
+                        palabra_encontrada = palabra
+                        print(f"  [OK] Encontrado con palabra parcial (normalizada)")
+                        break
+            
+            # Estrategia 4: Búsqueda inversa - palabras del Excel contenidas en la entrada del usuario (CON normalización)
+            if df_filtrado is None or df_filtrado.empty:
+                ciudad_completa_norm = normalizar_texto(ciudad_original)
+                print(f"  [INFO] Probando búsqueda inversa (ciudades del Excel contenidas en entrada del usuario)")
+                for idx, row in df.iterrows():
+                    ciudad_excel_norm = normalizar_texto(str(row[columna_ciudad]))
+                    if len(ciudad_excel_norm) > 3 and ciudad_excel_norm in ciudad_completa_norm:
+                        df_filtrado = df[df.index == idx]
+                        palabra_encontrada = str(row[columna_ciudad])
+                        print(f"  [OK] Encontrado con búsqueda inversa (normalizada)")
+                        break
+            
+            if df_filtrado is None or df_filtrado.empty:
+                try:
+                    print(f"  [WARN] No se encontró la ciudad '{ciudad_original}' en el Excel de tarifas")
+                    print(f"  [INFO] Palabras buscadas: {palabras}")
+                    print(f"  [INFO] Ciudades disponibles en el Excel (primeras 15):")
+                    # Mostrar algunas ciudades disponibles para ayudar al debug
+                    ciudades_muestra = df[columna_ciudad].head(15).tolist()
+                    for c in ciudades_muestra:
+                        print(f"         - {c}")
+                except UnicodeEncodeError:
+                    print(f"  [WARN] No se encontró la ciudad en el Excel de tarifas")
+                    print(f"  [INFO] (Error de codificación al mostrar detalles)")
+                return None
+            
+            # Si hay múltiples resultados, tomar el primero
+            if len(df_filtrado) > 1:
+                print(f"  [INFO] Se encontraron {len(df_filtrado)} coincidencias, usando la primera")
+            
+            # Obtener el valor de la tarifa
+            tarifa_con_iva = df_filtrado.iloc[0][columna_tarifa]
+            ciudad_encontrada = df_filtrado.iloc[0][columna_ciudad]
+            try:
+                print(f"  [OK] Ciudad encontrada: '{ciudad_encontrada}'")
+            except UnicodeEncodeError:
+                print(f"  [OK] Ciudad encontrada en el Excel")
+            print(f"  [OK] Tarifa encontrada con IVA: {tarifa_con_iva} COP")
+            
+            # Calcular valor sin IVA (dividir por 1.19)
+            tarifa_sin_iva = int(tarifa_con_iva / 1.19)
+            print(f"  [OK] Tarifa sin IVA: {tarifa_sin_iva} COP")
+            
+            return tarifa_sin_iva
+            
+        except FileNotFoundError:
+            print(f"  [ERROR] No se encontró el archivo: {ruta_excel}")
+            return None
+        except Exception as e:
+            print(f"  [ERROR] Error al obtener tarifa de flete: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def hacer_click_campo_flete_manual(self):
+        """
+        Hace scroll en la tabla de condiciones de SAP hasta encontrar la fila ZFLM
+        y hace click en el campo de importe (KWERT) de esa fila.
+        SAP requiere scroll interno de tabla, no scrollIntoView del navegador.
+        """
+        try:
+            print("\n[INFO] Buscando campo 'Flete manual' (ZFLM) en condiciones...")
+            
+            # Asegurarse de estar en el iframe
+            self.driver.switch_to.default_content()
+            time.sleep(0.3)
+            self.driver.switch_to.frame("ITSFRAME1")
+            
+            # Primero intentar encontrar ZFLM directamente (puede estar visible)
+            campo = self._encontrar_campo_zflm()
+            
+            if not campo:
+                # No está visible, hay que hacer scroll en la tabla de condiciones
+                print("  [INFO] ZFLM no visible, haciendo scroll en la tabla de condiciones...")
+                
+                # Buscar cualquier celda visible en la tabla de condiciones para hacer scroll
+                celda_tabla = None
+                try:
+                    # Buscar una celda en la tabla de condiciones (cualquier campo KWERT visible)
+                    celda_tabla = self.driver.find_element(By.XPATH, 
+                        "//*[contains(@lsdata, 'KOMV-KSCHL') or contains(@lsdata, 'KOMV-KWERT')]")
+                except:
+                    pass
+                
+                if celda_tabla:
+                    # Click en la celda para dar foco a la tabla
+                    try:
+                        celda_tabla.click()
+                        time.sleep(0.3)
+                    except:
+                        pass
+                
+                # Hacer scroll con Page Down dentro de la tabla (hasta 5 intentos)
+                for intento in range(5):
+                    # Enviar Page Down al elemento activo
+                    elemento_activo = self.driver.switch_to.active_element
+                    elemento_activo.send_keys(Keys.PAGE_DOWN)
+                    time.sleep(0.8)
+                    
+                    # Verificar si ahora ZFLM es visible
+                    campo = self._encontrar_campo_zflm()
+                    if campo:
+                        print(f"  [OK] ZFLM encontrado despues de {intento + 1} Page Down(s)")
+                        break
+                
+                if not campo:
+                    print("  [ERROR] No se encontro ZFLM despues de hacer scroll")
+                    self.driver.switch_to.default_content()
+                    return False
+            else:
+                print("  [OK] Campo ZFLM ya visible")
+            
+            # Hacer click en el campo de importe de ZFLM
+            try:
+                campo.click()
+                time.sleep(0.5)
+                print("  [OK] Click en campo 'Flete manual' realizado")
+            except:
+                try:
+                    self.driver.execute_script("arguments[0].click();", campo)
+                    time.sleep(0.5)
+                    print("  [OK] Click en campo 'Flete manual' realizado (JS)")
+                except Exception as e:
+                    print(f"  [ERROR] No se pudo hacer click: {str(e)[:100]}")
+                    self.driver.switch_to.default_content()
+                    return False
+            
+            self.driver.switch_to.default_content()
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Error al buscar campo 'Flete manual': {str(e)[:200]}")
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            return False
+    
+    def _encontrar_texto_flete_manual(self):
+        """
+        Busca el SPAN con texto 'Flete manual' en la tabla de condiciones.
+        Al hacer doble click abre la pantalla de detalle.
+        """
+        # Estrategia 1: span con lsdata que contiene 'Flete\x20manual'
+        try:
+            return self.driver.find_element(By.XPATH,
+                "//span[contains(@lsdata, 'Flete') and contains(@lsdata, 'manual') and @role='textbox']")
+        except:
+            pass
+        
+        # Estrategia 2: span con texto exacto
+        try:
+            return self.driver.find_element(By.XPATH,
+                "//span[@role='textbox'][normalize-space()='Flete manual']")
+        except:
+            pass
+        
+        # Estrategia 3: span en fila que contiene ZFLM
+        try:
+            return self.driver.find_element(By.XPATH,
+                "//tr[.//text()[contains(., 'ZFLM')]]//span[@role='textbox'][contains(., 'Flete')]")
+        except:
+            pass
+        
+        # Estrategia 4: td con texto 'Flete manual' -> span hijo
+        try:
+            return self.driver.find_element(By.XPATH,
+                "//td[normalize-space()='Flete manual']//span[@role='textbox']")
+        except:
+            pass
+        
+        return None
+    
+    def scroll_click_y_escribir_flete(self, valor):
+        """
+        Hace scroll hasta encontrar 'Flete manual', doble click en el texto
+        para abrir pantalla de detalle, escribe el valor en 'Valor condicion'
+        y presiona Atras (F3) para volver.
+        """
+        try:
+            print(f"\n[INFO] Scroll + click + escribir flete manual: {valor}")
+            valor_str = str(valor)
+            
+            # Entrar al iframe
+            self.driver.switch_to.default_content()
+            time.sleep(0.3)
+            self.driver.switch_to.frame("ITSFRAME1")
+            time.sleep(0.5)
+            
+            # === PASO 1: Encontrar el texto 'Flete manual' en la tabla ===
+            span_flete = self._encontrar_texto_flete_manual()
+            
+            if not span_flete:
+                print("  [INFO] Flete manual no visible, haciendo scroll...")
+                
+                # Dar foco a la tabla de condiciones
+                try:
+                    celda_tabla = self.driver.find_element(By.XPATH, 
+                        "//*[contains(@lsdata, 'KOMV-KSCHL') or contains(@lsdata, 'KOMV-KWERT')]")
+                    celda_tabla.click()
+                    time.sleep(0.3)
+                except:
+                    pass
+                
+                # Page Down hasta encontrar
+                for intento in range(5):
+                    elemento_activo = self.driver.switch_to.active_element
+                    elemento_activo.send_keys(Keys.PAGE_DOWN)
+                    time.sleep(0.8)
+                    
+                    span_flete = self._encontrar_texto_flete_manual()
+                    if span_flete:
+                        print(f"  [OK] Flete manual encontrado tras {intento + 1} Page Down(s)")
+                        break
+                
+                if not span_flete:
+                    print("  [ERROR] No se encontro 'Flete manual' tras scroll")
+                    self.driver.switch_to.default_content()
+                    return False
+            else:
+                print("  [OK] Flete manual ya visible")
+            
+            # === PASO 2: Doble click en el texto para abrir detalle ===
+            span_id = span_flete.get_attribute('id') or 'sin-id'
+            print(f"  [DEBUG] Span encontrado: id={span_id}")
+            
+            ActionChains(self.driver).double_click(span_flete).perform()
+            time.sleep(1.5)
+            print("  [OK] Doble click en 'Flete manual' => pantalla de detalle")
+            
+            # === PASO 3: Escribir valor en campo 'Valor condicion' ===
+            campo_valor = None
+            # Buscar el input de valor de condicion
+            for xpath in [
+                "//input[@id='M0:46:::6:20']",
+                "//input[contains(@lsdata, 'KOMV-KWERT')]",
+                "//input[@title='Valor de la condición' or @title='Valor condición']",
+                "//input[@inputmode='numeric' and contains(@lsdata, 'KWERT')]",
+            ]:
+                try:
+                    campo_valor = self.driver.find_element(By.XPATH, xpath)
+                    print(f"  [OK] Campo valor encontrado con: {xpath}")
+                    break
+                except:
+                    continue
+            
+            if not campo_valor:
+                print("  [ERROR] No se encontro campo 'Valor condicion'")
+                self.driver.switch_to.default_content()
+                return False
+            
+            # Click para activar el campo
+            campo_valor.click()
+            time.sleep(0.3)
+            
+            # Escribir valor
+            elemento_activo = self.driver.switch_to.active_element
+            elemento_activo.send_keys(Keys.CONTROL + "a")
+            time.sleep(0.2)
+            elemento_activo.send_keys(Keys.DELETE)
+            time.sleep(0.2)
+            elemento_activo.send_keys(valor_str)
+            time.sleep(0.3)
+            print(f"  [OK] Valor '{valor_str}' escrito en campo")
+            
+            # === PASO 4: Presionar Atras (F3) para volver ===
+            time.sleep(0.5)
+            # F3 en SAP funciona como Enter en el botón Atrás
+            elemento_activo = self.driver.switch_to.active_element
+            elemento_activo.send_keys(Keys.ENTER)
+            time.sleep(0.5)
+            
+            # Click en boton Atras
+            btn_atras = None
+            for xpath in [
+                "//div[@id='M0:36::btn[3]']",
+                "//div[@title='Atrás (F3)']",
+                "//div[contains(@lsdata, 'F3') and @role='button']",
+            ]:
+                try:
+                    btn_atras = self.driver.find_element(By.XPATH, xpath)
+                    break
+                except:
+                    continue
+            
+            if btn_atras:
+                btn_atras.click()
+                time.sleep(1)
+                print("  [OK] Click en Atras (F3) => volviendo a condiciones")
+            else:
+                # Fallback: enviar F3 directamente
+                elemento_activo = self.driver.switch_to.active_element
+                elemento_activo.send_keys(Keys.F3)
+                time.sleep(1)
+                print("  [OK] F3 enviado => volviendo a condiciones")
+            
+            self.driver.switch_to.default_content()
+            print(f"[OK] Flete manual {valor_str} ingresado correctamente")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] scroll_click_y_escribir_flete: {str(e)[:200]}")
+            import traceback
+            traceback.print_exc()
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            return False
+    
+    def ingresar_valor_flete_manual(self, valor):
+        """
+        Ingresa un valor en el campo 'Flete manual' (ZFLM).
+        Se llama DESPUÉS de hacer_click_campo_flete_manual() que ya hizo scroll.
+        """
+        try:
+            print(f"\n[INFO] Ingresando valor {valor} en campo 'Flete manual'...")
+            
+            valor_str = str(valor)
+            
+            # Asegurarse de estar en el iframe correcto
+            self.driver.switch_to.default_content()
+            self.driver.switch_to.frame("ITSFRAME1")
+            time.sleep(0.5)
+            
+            # Buscar el campo ZFLM
+            campo = self._encontrar_campo_zflm()
+            
+            if not campo:
+                print("  [ERROR] No se pudo encontrar el campo 'Flete manual'")
+                self.driver.switch_to.default_content()
+                return False
+            
+            campo_id = campo.get_attribute('id') or 'sin-id'
+            print(f"  [DEBUG] Campo flete encontrado: {campo_id}")
+            
+            # Doble click en el campo para activarlo
+            try:
+                ActionChains(self.driver).double_click(campo).perform()
+                time.sleep(0.5)
+                print(f"  [OK] Doble click en campo {campo_id}")
+            except:
+                self.driver.execute_script("arguments[0].click();", campo)
+                time.sleep(0.5)
+                print(f"  [OK] Click en campo {campo_id} (JS)")
+            
+            # Re-encontrar después del click (SAP puede regenerar el DOM)
+            campo = self._encontrar_campo_zflm()
+            if campo:
+                campo_id_nuevo = campo.get_attribute('id') or 'sin-id'
+                if campo_id_nuevo != campo_id:
+                    print(f"  [DEBUG] Campo regenerado: {campo_id_nuevo}")
+                    ActionChains(self.driver).double_click(campo).perform()
+                    time.sleep(0.5)
+            
+            # Usar active element para escribir
+            elemento_activo = self.driver.switch_to.active_element
+            activo_id = elemento_activo.get_attribute('id') or 'sin-id'
+            print(f"  [DEBUG] Elemento activo: {activo_id}")
+            
+            # Verificar que el activo es el campo correcto (contiene [7,8])
+            if '[7,8]' not in activo_id and campo:
+                print(f"  [WARN] Active element no es el campo flete, forzando click...")
+                campo.click()
+                time.sleep(0.3)
+                elemento_activo = self.driver.switch_to.active_element
+                activo_id = elemento_activo.get_attribute('id') or 'sin-id'
+                print(f"  [DEBUG] Elemento activo ahora: {activo_id}")
+            
+            # Escribir el valor
+            try:
+                elemento_activo.send_keys(Keys.CONTROL + "a")
+                time.sleep(0.2)
+                elemento_activo.send_keys(Keys.DELETE)
+                time.sleep(0.2)
+                elemento_activo.send_keys(valor_str)
+                print(f"  [OK] Valor '{valor_str}' escrito")
+            except Exception as e:
+                print(f"  [WARN] send_keys fallo: {str(e)[:100]}")
+                # Fallback: escribir directamente en el campo encontrado
+                if campo:
+                    try:
+                        campo.clear()
+                        campo.send_keys(valor_str)
+                        print(f"  [OK] Valor '{valor_str}' escrito directo en campo")
+                    except:
+                        ActionChains(self.driver).click(campo).pause(0.3).send_keys(valor_str).perform()
+                        print(f"  [OK] Valor '{valor_str}' escrito con ActionChains")
+            
+            time.sleep(0.5)
+            
+            # Confirmar con Enter
+            try:
+                elemento_activo = self.driver.switch_to.active_element
+                elemento_activo.send_keys(Keys.ENTER)
+                print("  [OK] Enter presionado")
+            except:
+                ActionChains(self.driver).send_keys(Keys.ENTER).perform()
+                print("  [OK] Enter presionado (ActionChains)")
+            
+            time.sleep(1)
+            
+            self.driver.switch_to.default_content()
+            print("[OK] Valor ingresado en 'Flete manual' correctamente")
+            return True
+            
+        except Exception as e:
+            try:
+                self.driver.switch_to.default_content()
+            except:
+                pass
+            print(f"[ERROR] Error al ingresar valor en 'Flete manual': {str(e)}")
+            return False
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def guardar_pedido(self):
+        """
+        Hace click en el botón 'Grabar' (Guardar) para confirmar y guardar el pedido
+        
+        Returns:
+            str o None: Número de pedido extraído del mensaje de SAP, o None si falló
+        """
+        try:
+            print("\n[INFO] Guardando pedido en SAP...")
+            
+            # El botón Grabar está dentro del iframe ITSFRAME1
+            self.driver.switch_to.default_content()
+            time.sleep(0.5)
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+                print("  [OK] Cambiado al iframe ITSFRAME1")
+            except Exception as eframe:
+                print(f"  [WARN] No se pudo cambiar al iframe: {str(eframe)}, buscando en doc principal")
+            
+            boton_grabar = None
+            
+            # Estrategia 1: Buscar por título "Grabar"
+            try:
+                boton_grabar = self.driver.find_element(By.XPATH, "//div[@role='button' and (contains(@title, 'Grabar') or contains(@title, 'Guardar'))]")
+                print("  [OK] Botón 'Grabar' encontrado por título")
+            except:
+                pass
+            
+            # Estrategia 2: Buscar por id común del botón grabar (btn[11])
+            if not boton_grabar:
+                try:
+                    boton_grabar = self.driver.find_element(By.XPATH, "//div[@role='button' and contains(@id, 'btn[11]')]")
+                    print("  [OK] Botón 'Grabar' encontrado por ID btn[11]")
+                except:
+                    pass
+            
+            # Estrategia 3: Buscar por lsdata que contenga CTRL_S
+            if not boton_grabar:
+                try:
+                    boton_grabar = self.driver.find_element(By.XPATH, "//div[@role='button' and contains(@lsdata, 'CTRL_S')]")
+                    print("  [OK] Botón 'Grabar' encontrado por shortcut Ctrl+S")
+                except:
+                    pass
+            
+            # Estrategia 4: Buscar cualquier botón con "Grab" en el título
+            if not boton_grabar:
+                try:
+                    boton_grabar = self.driver.find_element(By.XPATH, "//div[@role='button' and contains(@title, 'Grab')]")
+                    print("  [OK] Botón 'Grabar' encontrado por texto parcial")
+                except:
+                    pass
+            
+            if boton_grabar:
+                # Hacer scroll al botón
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", boton_grabar)
+                time.sleep(0.5)
+                
+                print(f"  [INFO] Haciendo click en botón 'Grabar'...")
+                try:
+                    boton_grabar.click()
+                    print("  [OK] Click realizado en botón 'Grabar'")
+                except:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", boton_grabar)
+                        print("  [OK] Click con JavaScript realizado en botón 'Grabar'")
+                    except Exception as e:
+                        print(f"  [WARN] Click falló ({str(e)[:80]}), usando Ctrl+S como fallback")
+                        self.driver.switch_to.default_content()
+                        ActionChains(self.driver).key_down(Keys.CONTROL).send_keys('s').key_up(Keys.CONTROL).perform()
+                        print("  [OK] Ctrl+S enviado")
+            else:
+                # Fallback final: Ctrl+S desde el documento principal
+                print("  [WARN] Botón 'Grabar' no encontrado, usando Ctrl+S...")
+                self.driver.switch_to.default_content()
+                ActionChains(self.driver).key_down(Keys.CONTROL).send_keys('s').key_up(Keys.CONTROL).perform()
+                print("  [OK] Ctrl+S enviado")
+            
+            # Esperar a que se procese el guardado
+            print("  [INFO] Esperando confirmación de guardado...")
+            time.sleep(3)
+            
+            # Extraer número de pedido del mensaje de la barra de estado
+            numero_pedido = None
+            
+            # Buscar en ambos contextos: doc principal e iframe
+            contextos = ['default', 'iframe']
+            for contexto in contextos:
+                if numero_pedido:
+                    break
+                    
+                try:
+                    if contexto == 'default':
+                        self.driver.switch_to.default_content()
+                    else:
+                        self.driver.switch_to.default_content()
+                        self.driver.switch_to.frame("ITSFRAME1")
+                except:
+                    continue
+                
+                # Estrategia 1: ID exacto del span de la barra de estado
+                if not numero_pedido:
+                    try:
+                        msg_element = self.driver.find_element(By.ID, "wnd[0]/sbar_msg-txt")
+                        texto_msg = msg_element.text.strip()
+                        if texto_msg:
+                            print(f"  [OK] Mensaje barra de estado ({contexto}): {texto_msg}")
+                            numeros = re.findall(r'\d{8,}', texto_msg)
+                            if numeros:
+                                numero_pedido = numeros[0]
+                    except:
+                        pass
+                
+                # Estrategia 2: clase CSS lsMessageBar__text
+                if not numero_pedido:
+                    try:
+                        msg_element = self.driver.find_element(By.CSS_SELECTOR, "span.lsMessageBar__text")
+                        texto_msg = msg_element.text.strip()
+                        if texto_msg:
+                            print(f"  [OK] Mensaje barra CSS ({contexto}): {texto_msg}")
+                            numeros = re.findall(r'\d{8,}', texto_msg)
+                            if numeros:
+                                numero_pedido = numeros[0]
+                    except:
+                        pass
+                
+                # Estrategia 3: buscar por texto de confirmación
+                if not numero_pedido:
+                    try:
+                        mensajes = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'se ha grabado') or contains(text(), 'se grabó') or contains(text(), 'se creó')]")
+                        for mensaje in mensajes:
+                            texto = mensaje.text.strip()
+                            if texto:
+                                print(f"  [OK] Mensaje SAP ({contexto}): {texto}")
+                                numeros = re.findall(r'\d{8,}', texto)
+                                if numeros:
+                                    numero_pedido = numeros[0]
+                                    break
+                    except:
+                        pass
+            
+            # Volver al doc principal
+            self.driver.switch_to.default_content()
+            
+            print("[OK] Pedido guardado exitosamente")
+            return numero_pedido
+            
+        except Exception as e:
+            print(f"[ERROR] Error al guardar pedido: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def recargar_pagina(self):
+        """
+        Recarga la página de SAP para volver al estado inicial
+        y preparar el procesamiento del siguiente cliente
+        """
+        try:
+            print("\n--- Recargando pagina para siguiente cliente ---")
+            
+            # Volver al contexto principal antes de recargar
+            self.driver.switch_to.default_content()
+            time.sleep(0.5)
+            
+            # Recargar la página
+            self.driver.refresh()
+            print("  [OK] Pagina recargada")
+            
+            # Esperar a que cargue completamente
+            time.sleep(3)
+            
+            print("[OK] Listo para procesar siguiente cliente")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Error al recargar pagina: {str(e)}")
+            return False
