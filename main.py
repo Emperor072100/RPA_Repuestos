@@ -137,15 +137,17 @@ class RPA_AUTECO:
             return False
         return True
     
-    def procesar_cliente(self, cliente: dict, numero: int, total: int):
+    def procesar_cliente(self, cliente: dict, numero: int, total: int, precios_precargados=None):
         """
         Procesa un cliente individual
-        
+
         Args:
             cliente: Diccionario con la información del cliente
             numero: Número del cliente actual
             total: Total de clientes a procesar
-            
+            precios_precargados: Lista de dicts {codigo, cantidad, precio_sin_iva, precio_con_iva}
+                                 obtenida antes de entrar a SAP. Si se provee, se omite FASE 1.
+
         Returns:
             True si el procesamiento fue exitoso
         """
@@ -206,8 +208,7 @@ class RPA_AUTECO:
                 return False
             
             print("[OK] Navegacion a VA01 completada")
-            time.sleep(2)
-            
+
             # Llenar datos organizativos
             print("\n>> Llenando datos organizativos...")
             if not consultas.llenar_datos_organizativos(
@@ -221,56 +222,54 @@ class RPA_AUTECO:
                 if self.gestor_excel:
                     self.gestor_excel.actualizar_estado(indice_excel, "Error - Datos organizativos", motivo)
                 return False
-            
+
             print("[OK] Datos organizativos llenados correctamente")
-            time.sleep(2)
-            
+
             # Ingresar cédula del solicitante
             print("\n>> Ingresando cedula del solicitante...")
             if not consultas.ingresar_cedula_solicitante(cedula):
                 print("[WARN] No se pudo ingresar la cedula del solicitante, continuando...")
-            
-            time.sleep(3)
-            
+
+            time.sleep(1)
+
             # Ingresar cédula del destinatario de mercancía
             print("\n>> Ingresando cedula del destinatario...")
             if not consultas.ingresar_cedula_destinatario(cedula):
                 print("[WARN] No se pudo ingresar la cedula del destinatario, continuando...")
-            
-            time.sleep(3)
-            
-            # Ingresar cédula en N° ped.cliente
-            print("\n>> Ingresando cedula en N ped.cliente...")
-            if not consultas.ingresar_numero_pedido_cliente(cedula):
+
+            time.sleep(1)
+
+            # Ingresar referencia en N° ped.cliente (cedula-material para detección de duplicados)
+            primer_material = materiales_lista[0][0] if materiales_lista else None
+            print("\n>> Ingresando referencia en N ped.cliente...")
+            if not consultas.ingresar_numero_pedido_cliente(cedula, material=primer_material):
                 print("[WARN] No se pudo ingresar N ped.cliente, continuando...")
-            
-            time.sleep(3)
-            
+
+            time.sleep(1)
+
             # Seleccionar Modific.cantidad
             print("\n>> Seleccionando Modific.cantidad...")
             if not consultas.seleccionar_modific_cantidad():
                 print("[WARN] No se pudo seleccionar Modific.cantidad, continuando...")
-            
-            time.sleep(1)
-            
+
             # Seleccionar Pedido Ecommerce Cliente Final
             print("\n>> Seleccionando Pedido Ecommerce Cliente Final...")
             if not consultas.seleccionar_pedido_ecommerce():
                 print("[WARN] No se pudo seleccionar Pedido Ecommerce, continuando...")
-            
+
             # Verificar si hay error de pedido duplicado y corregirlo
             print("\n>> Verificando pedido duplicado...")
             if not consultas.verificar_y_corregir_pedido_duplicado(telefono):
                 print("[WARN] Hubo problema al verificar/corregir pedido duplicado, continuando...")
-            
-            time.sleep(2)
-            
+
+            time.sleep(1)
+
             # Confirmar N° ped.cliente con Enter para habilitar Material/Cantidad
             print("\n>> Confirmando N ped.cliente con Enter...")
             if not consultas.confirmar_numero_pedido_cliente(telefono=telefono):
                 print("[WARN] No se pudo confirmar N ped.cliente, continuando...")
-            
-            time.sleep(5)
+
+            time.sleep(3)
             
             # Ingresar Material y Cantidad para cada repuesto
             print(f"\n>> Ingresando {len(materiales_lista)} Material(es) y Cantidad(es)...")
@@ -294,8 +293,7 @@ class RPA_AUTECO:
                 
                 # Pausa entre materiales para dar tiempo a SAP
                 if idx < len(materiales_lista):  # No esperar después del último
-                    print(f"   [INFO] Esperando 2 segundos antes del siguiente material...")
-                    time.sleep(2)
+                    time.sleep(1)
             
             # Verificar si se procesó al menos un material
             if materiales_exitosos == 0:
@@ -338,74 +336,74 @@ class RPA_AUTECO:
                 if self.gestor_excel:
                     self.gestor_excel.actualizar_estado(indice_excel, "Error - Pestana Condiciones", motivo)
                 raise Exception(motivo)
-            
-            time.sleep(1)
-            
+
             # Hacer click en el campo de condiciones
             print("\n>> Haciendo click en campo de condiciones...")
             if not consultas.hacer_click_campo_condiciones():
                 print("[WARN] No se pudo hacer click en campo de condiciones, continuando...")
             
-            time.sleep(1)
-            
             # ============================================================
-            # FASE 1: OBTENER PRECIOS DE TODOS LOS MATERIALES DEL PORTAL
+            # FASE 1: PRECIOS DEL PORTAL (precargados o consultados ahora)
             # ============================================================
             print(f"\n{'='*60}")
-            print(f"[FASE 1] Obteniendo precios de {len(materiales_lista)} material(es) del portal...")
-            print(f"{'='*60}")
-            
-            # Lista para almacenar información de todos los materiales
             materiales_con_precios = []
             suma_total_con_iva = 0
-            
-            for indice, material_item in enumerate(materiales_lista):
-                material_codigo = material_item[0]
-                print(f"\n>> Buscando material {indice + 1}/{len(materiales_lista)}: {material_codigo} en portal...")
-                
-                # Abrir portal de socios para obtener el valor de este material
-                resultado_portal = consultas.abrir_portal_socios(cedula, material_codigo)
-                
-                # Verificar si obtuvimos resultado
-                if not resultado_portal:
-                    motivo = f"No se obtuvo precio del portal para material {material_codigo}"
-                    print(f"  [ERROR] {motivo}")
-                    if self.gestor_excel:
-                        self.gestor_excel.actualizar_estado(indice_excel, "Error - Precio no disponible", motivo)
-                    consultas.recargar_pagina()
-                    raise Exception(motivo)
-                
-                # Extraer información del resultado
-                precio_sin_iva = resultado_portal.get('precio_sin_iva')
-                precio_con_iva = resultado_portal.get('precio_con_iva')
-                
-                # Validar que los precios no sean 0 ni None
-                if not precio_sin_iva or not precio_con_iva or precio_sin_iva == 0 or precio_con_iva == 0:
-                    motivo = f"Precio en 0 para material {material_codigo} (sin IVA: {precio_sin_iva}, con IVA: {precio_con_iva})"
-                    print(f"  [ERROR] {motivo}")
-                    if self.gestor_excel:
-                        self.gestor_excel.actualizar_estado(indice_excel, "Error - Precio en 0", motivo)
-                    consultas.recargar_pagina()
-                    raise Exception(motivo)
-                
-                print(f"  [OK] Material {material_codigo}:")
-                print(f"       Precio sin IVA: {precio_sin_iva} COP")
-                print(f"       Precio con IVA: {precio_con_iva} COP")
-                
-                # Guardar info del material
-                materiales_con_precios.append({
-                    'codigo': material_codigo,
-                    'cantidad': material_item[1],
-                    'precio_sin_iva': precio_sin_iva,
-                    'precio_con_iva': precio_con_iva
-                })
-                
-                # Sumar al total con IVA (multiplicar por cantidad)
-                cantidad_material = int(material_item[1])
-                suma_total_con_iva += precio_con_iva * cantidad_material
-                print(f"       Suma parcial (x{cantidad_material}): {precio_con_iva * cantidad_material:,} COP")
-            
-            # Verificar que obtuvimos precios
+
+            if precios_precargados is not None:
+                # Usar precios ya obtenidos antes de entrar a SAP
+                print(f"[FASE 1] Usando {len(precios_precargados)} precio(s) precargado(s) del portal")
+                print(f"{'='*60}")
+                materiales_con_precios = precios_precargados
+                for item in materiales_con_precios:
+                    precio_con_iva = item['precio_con_iva']
+                    cantidad_material = int(item['cantidad'])
+                    suma_total_con_iva += precio_con_iva * cantidad_material
+                    print(f"  Material {item['codigo']}: sin IVA={item['precio_sin_iva']}, con IVA={precio_con_iva:,} (x{cantidad_material})")
+            else:
+                # Flujo original: consultar portal desde dentro de SAP
+                print(f"[FASE 1] Obteniendo precios de {len(materiales_lista)} material(es) del portal...")
+                print(f"{'='*60}")
+
+                for indice, material_item in enumerate(materiales_lista):
+                    material_codigo = material_item[0]
+                    print(f"\n>> Buscando material {indice + 1}/{len(materiales_lista)}: {material_codigo} en portal...")
+
+                    resultado_portal = consultas.abrir_portal_socios(cedula, material_codigo)
+
+                    if not resultado_portal:
+                        motivo = f"No se obtuvo precio del portal para material {material_codigo}"
+                        print(f"  [ERROR] {motivo}")
+                        if self.gestor_excel:
+                            self.gestor_excel.actualizar_estado(indice_excel, "Error - Precio no disponible", motivo)
+                        consultas.recargar_pagina()
+                        raise Exception(motivo)
+
+                    precio_sin_iva = resultado_portal.get('precio_sin_iva')
+                    precio_con_iva = resultado_portal.get('precio_con_iva')
+
+                    if not precio_sin_iva or not precio_con_iva or precio_sin_iva == 0 or precio_con_iva == 0:
+                        motivo = f"Precio en 0 para material {material_codigo} (sin IVA: {precio_sin_iva}, con IVA: {precio_con_iva})"
+                        print(f"  [ERROR] {motivo}")
+                        if self.gestor_excel:
+                            self.gestor_excel.actualizar_estado(indice_excel, "Error - Precio en 0", motivo)
+                        consultas.recargar_pagina()
+                        raise Exception(motivo)
+
+                    print(f"  [OK] Material {material_codigo}:")
+                    print(f"       Precio sin IVA: {precio_sin_iva} COP")
+                    print(f"       Precio con IVA: {precio_con_iva} COP")
+
+                    materiales_con_precios.append({
+                        'codigo': material_codigo,
+                        'cantidad': material_item[1],
+                        'precio_sin_iva': precio_sin_iva,
+                        'precio_con_iva': precio_con_iva
+                    })
+
+                    cantidad_material = int(material_item[1])
+                    suma_total_con_iva += precio_con_iva * cantidad_material
+                    print(f"       Suma parcial (x{cantidad_material}): {precio_con_iva * cantidad_material:,} COP")
+
             if not materiales_con_precios:
                 raise Exception("No se pudo obtener precios del portal para ningún material")
             
@@ -418,7 +416,7 @@ class RPA_AUTECO:
             # ============================================================
             # FASE 2: DECIDIR ESTRATEGIA (CON O SIN FLETE)
             # ============================================================
-            LIMITE_FLETE = 150000
+            LIMITE_FLETE = 200000 #el flete es 200k 
             aplicar_flete = suma_total_con_iva < LIMITE_FLETE
             tarifa_flete = None
             valor_flete_por_material = 0
@@ -474,8 +472,7 @@ class RPA_AUTECO:
                         if self.gestor_excel:
                             self.gestor_excel.actualizar_estado(indice_excel, "Error - Posicion siguiente", motivo)
                         raise Exception(motivo)
-                    time.sleep(1)
-                
+
                 # Ingresar precio sin IVA
                 print(f"  [INFO] Ingresando precio sin IVA: {precio_sin_iva} COP")
                 if consultas.ingresar_valor_condiciones(precio_sin_iva):
@@ -486,13 +483,11 @@ class RPA_AUTECO:
                     if self.gestor_excel:
                         self.gestor_excel.actualizar_estado(indice_excel, "Error - Precio no ingresado", motivo)
                     raise Exception(motivo)
-                
-                time.sleep(1)
-                
+
                 # Si aplica flete, ingresar flete manual
                 if aplicar_flete and valor_flete_por_material > 0:
                     print(f"  [INFO] Ingresando flete manual: {valor_flete_por_material} COP")
-                    
+
                     if consultas.scroll_click_y_escribir_flete(valor_flete_por_material):
                         print(f"  [OK] Flete manual ingresado")
                     else:
@@ -500,8 +495,6 @@ class RPA_AUTECO:
                         print(f"  [WARN] {aviso_flete}")
                         if self.gestor_excel:
                             self.gestor_excel.actualizar_estado(indice_excel, "Incompleto - Flete no ingresado", aviso_flete)
-                    
-                    time.sleep(1)
             
             print(f"\n{'='*60}")
             print(f"[OK] Todos los materiales procesados")
@@ -520,21 +513,17 @@ class RPA_AUTECO:
             
             if numero_pedido:
                 print(f"[OK] Pedido guardado exitosamente - N° Pedido: {numero_pedido}")
-                # Guardar número de pedido en Excel
                 if self.gestor_excel:
                     self.gestor_excel.actualizar_numero_pedido(indice_excel, numero_pedido)
             else:
                 print("[WARN] Pedido guardado pero no se pudo extraer el numero de pedido")
-            
+
             print(f"\n[OK] Cliente {numero}/{total} procesado exitosamente")
-            
-            # Actualizar estado en Excel
+
             if self.gestor_excel:
                 detalle = f"Proceso completado - Pedido: {numero_pedido}" if numero_pedido else "Proceso completado exitosamente"
                 self.gestor_excel.actualizar_estado(indice_excel, "Pedido creado", detalle)
-            
-            time.sleep(1)
-            
+
             return True
             
         except Exception as e:
@@ -547,6 +536,10 @@ class RPA_AUTECO:
                 if "hay que seleccionar detalle de venta" in error_msg:
                     print(f"  [SKIP] Cliente omitido por requerimiento: {error_msg}")
                     self.gestor_excel.actualizar_estado(indice_excel, "Omitido", "Determinar area de venta")
+                    raise  # Re-lanzar para que el loop no reintente
+                elif "pedido ya existe" in error_msg.lower():
+                    print(f"  [SKIP] Pedido duplicado detectado: {error_msg}")
+                    self.gestor_excel.actualizar_estado(indice_excel, "Pedido ya existe", error_msg[:200])
                     raise  # Re-lanzar para que el loop no reintente
                 elif any(txt in error_msg.lower() for txt in ["bloqueado", "bloqueo", "org de venta", "org.ventas", "no puede ser procesado", "no está previsto", "no est\u00e1 previsto"]):
                     print(f"  [SKIP] Cliente omitido: {error_msg}")
@@ -572,171 +565,134 @@ class RPA_AUTECO:
             if not self.cargar_clientes():
                 return False
             
-            # Procesar cada cliente del Excel (con navegador independiente)
+            # Procesar cada cliente del Excel con UN SOLO navegador
             total_clientes = len(self.clientes)
             clientes_exitosos = 0
             clientes_fallidos = 0
-            
-            for idx, cliente in enumerate(self.clientes, start=1):
-                print("\n" + "="*60)
-                print(f">>> CLIENTE {idx}/{total_clientes} <<<")
-                print("="*60)
-                
-                try:
-                    # 1. Crear driver para este cliente
-                    print(f"\n1. Abriendo navegador para cliente {idx}...")
-                    self.driver_sap = DriverSAP()
-                    if not self.driver_sap.crear_driver():
-                        print(f"[ERROR] No se pudo crear el driver para cliente {idx}")
-                        clientes_fallidos += 1
-                        continue
-                    
-                    # 2. Navegar a SAP
-                    print(f"\n2. Navegando a SAP...")
-                    self.driver_sap.ir_a_url(URL_SAP)
-                    time.sleep(3)
-                    
-                    # 3. Realizar login
-                    print(f"\n3. Realizando login en SAP...")
-                    login = LoginSAP(self.driver_sap)
-                    if not login.iniciar_sesion(USUARIO, CONTRASEÑA):
-                        print(f"[ERROR] Error durante el login para cliente {idx}")
-                        clientes_fallidos += 1
-                        # Cerrar navegador antes de continuar
-                        self.driver_sap.cerrar_driver()
-                        continue
-                    
-                    print("[OK] Login completado exitosamente")
-                    time.sleep(2)
-                    
-                    # 4. Procesar el cliente CON REINTENTOS para errores de portal
-                    max_reintentos = 3
-                    reintento = 0
-                    exito = False
-                    ultimo_error = None
-                    
-                    while reintento < max_reintentos and not exito:
-                        try:
-                            exito = self.procesar_cliente(cliente, idx, total_clientes)
-                            if exito:
-                                break  # Éxito, salir del loop de reintentos
-                            else:
-                                # procesar_cliente retornó False (error no crítico)
-                                reintento += 1
-                                if reintento < max_reintentos:
-                                    print(f"\n[REINTENTO {reintento}/{max_reintentos}] Cliente devolvió False. Reiniciando navegador...")
-                                    try:
-                                        if self.driver_sap:
-                                            self.driver_sap.cerrar_driver()
-                                    except:
-                                        pass
-                                    time.sleep(3)
-                                    self.driver_sap = DriverSAP()
-                                    if not self.driver_sap.crear_driver():
-                                        print(f"[ERROR] No se pudo recrear el driver en reintento {reintento}")
-                                        break
-                                    self.driver_sap.ir_a_url(URL_SAP)
-                                    time.sleep(3)
-                                    login = LoginSAP(self.driver_sap)
-                                    if not login.iniciar_sesion(USUARIO, CONTRASEÑA):
-                                        print(f"[ERROR] Error durante el login en reintento {reintento}")
-                                        break
-                                    print(f"[INFO] Reintentando procesamiento del cliente...")
-                                    time.sleep(2)
+
+            # Crear driver UNA SOLA VEZ para todos los clientes
+            print("\n>> Abriendo navegador...")
+            self.driver_sap = DriverSAP()
+            if not self.driver_sap.crear_driver():
+                print("[ERROR] No se pudo crear el driver")
+                return False
+
+            url_portal = "https://portal-socios-auteco-portal-approuter.cfapps.us10.hana.ondemand.com/autecoPortalApp/index.html"
+
+            try:
+                for idx, cliente in enumerate(self.clientes, start=1):
+                    print("\n" + "="*60)
+                    print(f">>> CLIENTE {idx}/{total_clientes} <<<")
+                    print("="*60)
+
+                    try:
+                        # 0. Pre-extraer materiales (sin navegacion)
+                        ref_data_previo = procesar_referencia(cliente)
+                        if ref_data_previo["descartar"]:
+                            nombre_previo = cliente.get("Nombre completo", "N/A")
+                            print(f"[SKIP] Cliente {idx} ({nombre_previo}) descartado por referencia invalida")
+                            indice_excel_previo = cliente.get("_indice_original", idx - 1)
+                            if self.gestor_excel:
+                                self.gestor_excel.actualizar_estado(indice_excel_previo, "Omitido", "Referencia invalida")
+                            clientes_fallidos += 1
+                            continue
+                        materiales_para_portal = ref_data_previo["materiales"]
+
+                        # 1. Navegar al portal y obtener precios
+                        print("\n1. Obteniendo precios del portal...")
+                        self.driver_sap.ir_a_url(url_portal)
+                        consultas_portal = ConsultasSAP(self.driver_sap)
+                        precios_portal = consultas_portal.obtener_todos_precios_portal(materiales_para_portal)
+
+                        if not precios_portal:
+                            print(f"[ERROR] No se pudieron obtener precios del portal para cliente {idx}")
+                            clientes_fallidos += 1
+                            indice_excel_previo = cliente.get("_indice_original", idx - 1)
+                            if self.gestor_excel:
+                                self.gestor_excel.actualizar_estado(indice_excel_previo, "Error - Portal sin precio", "No se obtuvieron precios del portal")
+                            continue
+
+                        # 2. Navegar a SAP
+                        print("\n2. Navegando a SAP...")
+                        self.driver_sap.ir_a_url(URL_SAP)
+
+                        # 3. Login (inteligente: omite si la sesion ya esta activa)
+                        print("\n3. Verificando sesion SAP...")
+                        login = LoginSAP(self.driver_sap)
+                        if not login.iniciar_sesion(USUARIO, CONTRASEÑA):
+                            print(f"[ERROR] Error durante el login para cliente {idx}")
+                            clientes_fallidos += 1
+                            continue
+
+                        print("[OK] Sesion SAP lista")
+
+                        # 4. Procesar el cliente SIN REINTENTOS
+                        max_reintentos = 1
+                        reintento = 0
+                        exito = False
+                        ultimo_error = None
+
+                        while reintento < max_reintentos and not exito:
+                            try:
+                                exito = self.procesar_cliente(cliente, idx, total_clientes, precios_precargados=precios_portal)
+                                if exito:
+                                    break
                                 else:
+                                    reintento += 1
                                     print(f"\n[ERROR] Se agotaron los {max_reintentos} reintentos (retorno False)")
                                     break
-                                
-                        except Exception as e:
-                            ultimo_error = str(e)
-                            error_lower = str(e).lower()
-                            
-                            # Errores NO recuperables: bloqueos y org de ventas -> saltar cliente inmediatamente
-                            if "bloqueo" in error_lower or "bloqueado" in error_lower or "org" in error_lower and "venta" in error_lower or "no puede ser procesado" in error_lower:
-                                print(f"\n[SKIP] Error de bloqueo/org ventas detectado, saltando cliente sin reintentar: {str(e)[:150]}")
-                                exito = False
-                                break
-                            
-                            # Verificar si es un error recuperable (portal, precio o intercepciones)
-                            if "No se obtuvo precio del portal" in str(e) or "No se pudo ingresar precio sin IVA" in str(e) or "element click intercepted" in str(e) or "reintentando cliente" in str(e):
-                                reintento += 1
-                                
-                                if reintento < max_reintentos:
-                                    print(f"\n[REINTENTO {reintento}/{max_reintentos}] Error de portal/precio/intercepciones detectado. Reiniciando el cliente...")
-                                    print(f"  Cerrando navegador...")
-                                    try:
-                                        if self.driver_sap:
-                                            self.driver_sap.cerrar_driver()
-                                    except:
-                                        pass
-                                    
-                                    time.sleep(3)
-                                    
-                                    print(f"  Recreando driver...")
-                                    self.driver_sap = DriverSAP()
-                                    if not self.driver_sap.crear_driver():
-                                        print(f"[ERROR] No se pudo recrear el driver en reintento {reintento}")
-                                        break
-                                    
-                                    self.driver_sap.ir_a_url(URL_SAP)
-                                    time.sleep(3)
-                                    
-                                    print(f"  Realizando login nuevamente...")
-                                    login = LoginSAP(self.driver_sap)
-                                    if not login.iniciar_sesion(USUARIO, CONTRASEÑA):
-                                        print(f"[ERROR] Error durante el login en reintento {reintento}")
-                                        break
-                                    
-                                    print(f"[INFO] Reintentando procesamiento del cliente...")
-                                    time.sleep(2)
-                                    # El loop continuará automáticamente
-                                else:
-                                    # Se agotaron los reintentos
-                                    print(f"\n[ERROR] Se agotaron los {max_reintentos} reintentos por error de portal/precio/intercepciones")
+
+                            except Exception as e:
+                                ultimo_error = str(e)
+                                error_lower = str(e).lower()
+
+                                if "pedido ya existe" in error_lower:
+                                    print(f"\n[SKIP] Pedido duplicado, saltando cliente: {str(e)[:150]}")
                                     exito = False
                                     break
-                            else:
-                                # No es un error de portal, lanzar normalmente
-                                raise
-                    
-                    if exito:
-                        clientes_exitosos += 1
-                        if reintento > 0:
-                            print(f"[OK] Cliente {idx} procesado exitosamente después de {reintento} reintento(s)")
-                    else:
-                        clientes_fallidos += 1
-                        if reintento > 0:
-                            print(f"[WARN] Cliente {idx} falló después de {reintento} reintento(s)")
+                                elif "bloqueo" in error_lower or "bloqueado" in error_lower or ("org" in error_lower and "venta" in error_lower) or "no puede ser procesado" in error_lower:
+                                    print(f"\n[SKIP] Error de bloqueo/org ventas: {str(e)[:150]}")
+                                    exito = False
+                                    break
+
+                                print(f"\n[ERROR] Error no recuperable, pasando al siguiente cliente: {str(e)[:150]}")
+                                exito = False
+                                break
+
+                        if exito:
+                            clientes_exitosos += 1
+                            print(f"[OK] Cliente {idx} procesado exitosamente")
                         else:
-                            print(f"[WARN] Cliente {idx} falló")
-                    
-                except Exception as e:
-                    print(f"\n[ERROR] Error al procesar cliente {idx}: {str(e)}")
-                    clientes_fallidos += 1
-                
-                finally:
-                    # 5. SIEMPRE cerrar el navegador después de cada cliente
-                    print(f"\n>> Cerrando navegador del cliente {idx}...")
-                    try:
-                        if self.driver_sap:
-                            self.driver_sap.cerrar_driver()
-                            print(f"[OK] Navegador cerrado para cliente {idx}")
+                            clientes_fallidos += 1
+                            print(f"[WARN] Cliente {idx} fallo")
+
                     except Exception as e:
-                        print(f"[WARN] Error al cerrar navegador: {str(e)}")
-                    
-                    # Guardar estados en Excel después de cada cliente
-                    if self.gestor_excel:
-                        try:
-                            self.gestor_excel.guardar()
-                            print(f"  [OK] Estados guardados en Excel")
-                        except Exception as e:
-                            print(f"  [WARN] Error al guardar Excel: {str(e)[:100]}")
-                    
-                    # Pequeña pausa entre clientes
-                    if idx < total_clientes:
-                        print(f"\n[INFO] Esperando 2 segundos antes del siguiente cliente...")
-                        time.sleep(2)
-            
+                        print(f"\n[ERROR] Error al procesar cliente {idx}: {str(e)}")
+                        clientes_fallidos += 1
+
+                    finally:
+                        # Guardar Excel despues de cada cliente (sin cerrar navegador)
+                        if self.gestor_excel:
+                            try:
+                                self.gestor_excel.guardar()
+                                print(f"  [OK] Estados guardados en Excel")
+                            except Exception as e:
+                                print(f"  [WARN] Error al guardar Excel: {str(e)[:100]}")
+
+                        # Pausa entre clientes
+                        if idx < total_clientes:
+                            time.sleep(1)
+
+            finally:
+                # Cerrar navegador UNA SOLA VEZ al terminar todos los clientes
+                print("\n>> Cerrando navegador...")
+                try:
+                    if self.driver_sap:
+                        self.driver_sap.cerrar_driver()
+                        print("[OK] Navegador cerrado")
+                except Exception as e:
+                    print(f"[WARN] Error al cerrar navegador: {str(e)}")
+
             # Resumen final
             print("\n" + "="*60)
             print(">>> RPA COMPLETADO <<<")

@@ -68,13 +68,12 @@ class DriverSAP:
     def ir_a_url(self, url: str):
         """
         Navega a una URL específica
-        
+
         Args:
             url: URL a la que navegar
         """
         try:
             self.driver.get(url)
-            time.sleep(2)  # Espera a que cargue la página
             print(f"[OK] Navegando a: {url}")
         except Exception as e:
             print(f"[ERROR] Error al navegar: {str(e)}")
@@ -97,7 +96,6 @@ class DriverSAP:
             # Limpia el campo y escribe
             elemento.clear()
             elemento.send_keys(valor)
-            time.sleep(0.5)
             
             print(f"[OK] Escrito '{valor}' en elemento: {selector}")
             
@@ -120,10 +118,8 @@ class DriverSAP:
             
             # Scroll hasta el elemento si es necesario
             self.driver.execute_script("arguments[0].scrollIntoView(true);", elemento)
-            time.sleep(0.3)
-            
+
             elemento.click()
-            time.sleep(0.5)
             
             print(f"[OK] Click realizado en: {selector}")
             

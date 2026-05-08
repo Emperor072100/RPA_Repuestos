@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f'OK: {f}'\\) for f in ['main.py', 'modulos/login_sap.py', 'modulos/driver_selenium.py', 'modulos/consultas_sap.py']]\")",
+      "Bash(py -c ' *)"
+    ]
+  }
+}
