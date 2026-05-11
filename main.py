@@ -10,6 +10,7 @@ import os
 import time
 import tkinter as tk
 from tkinter import filedialog
+import requests
 
 # Agregar rutas para importar módulos
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from modulos.driver_selenium import DriverSAP
 from modulos.login_sap import LoginSAP
 from modulos.consultas_sap import ConsultasSAP
-from modulos.leer_excel import leer_clientes_excel, obtener_marca, obtener_datos_organizativos, extraer_cedula, extraer_telefono, procesar_referencia, extraer_ciudad, GestorExcelEstados
+from modulos.leer_excel import leer_clientes_excel, obtener_marca, obtener_datos_organizativos, extraer_cedula, extraer_telefono, procesar_referencia, extraer_ciudad, GestorExcelEstados, extraer_id
 from config.credenciales import USUARIO, CONTRASEÑA, URL_SAP
 
 # Ruta al archivo Excel con los clientes (ahora seleccionable por el usuario)
@@ -137,6 +138,36 @@ class RPA_AUTECO:
             return False
         return True
     
+    def notificar_pedido_creado(self, cliente_id: str) -> bool:
+        """
+        Notifica al API externo que un pedido fue creado exitosamente.
+
+        Args:
+            cliente_id: ID del registro en el Excel (columna 'ID')
+        """
+        url = f"https://cx-andesbpo-auteco-rnd-backend.agwhdq.easypanel.host/api/rpa/pedido-creado/{cliente_id}"
+        headers = {
+            "X-API-Key": "TmZFKOoU8SiKuWyczEn9Ji4BtpAoOZTMXDS-Qvf_QEQ",
+            "Content-Type": "application/json"
+        }
+        body = {
+            "ok": True,
+            "cliente_id": int(cliente_id),
+            "estado": "PEDIDO_CREADO",
+            "mensaje": f"Solicitud {cliente_id} actualizada a Pedido creado"
+        }
+        try:
+            response = requests.post(url, headers=headers, json=body, timeout=30)
+            if response.ok:
+                print(f"  [OK] API notificada correctamente (HTTP {response.status_code})")
+                return True
+            else:
+                print(f"  [WARN] API respondio con error: HTTP {response.status_code} - {response.text[:200]}")
+                return False
+        except Exception as e:
+            print(f"  [WARN] Error al notificar API: {str(e)}")
+            return False
+
     def procesar_cliente(self, cliente: dict, numero: int, total: int, precios_precargados=None):
         """
         Procesa un cliente individual
@@ -515,6 +546,13 @@ class RPA_AUTECO:
                 print(f"[OK] Pedido guardado exitosamente - N° Pedido: {numero_pedido}")
                 if self.gestor_excel:
                     self.gestor_excel.actualizar_numero_pedido(indice_excel, numero_pedido)
+                # Notificar API con el ID del Excel
+                cliente_id = extraer_id(cliente)
+                if cliente_id:
+                    print(f"\n>> Notificando API para ID {cliente_id}...")
+                    self.notificar_pedido_creado(cliente_id)
+                else:
+                    print("[WARN] No se encontro columna 'ID' en el Excel, omitiendo notificacion API")
             else:
                 print("[WARN] Pedido guardado pero no se pudo extraer el numero de pedido")
 

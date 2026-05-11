@@ -35,6 +35,22 @@ def leer_clientes_excel(ruta_archivo: str) -> List[Dict]:
         return []
 
 
+def extraer_id(cliente: Dict) -> str:
+    """
+    Extrae el ID del diccionario del cliente (columna 'ID' del Excel)
+
+    Returns:
+        El ID del cliente como string, o None si no se encuentra
+    """
+    for columna, valor in cliente.items():
+        if columna.strip().upper() == 'ID':
+            try:
+                return str(int(float(valor)))
+            except (ValueError, TypeError):
+                return str(valor).strip()
+    return None
+
+
 def extraer_cedula(cliente: Dict) -> str:
     """
     Extrae la cédula del diccionario del cliente
@@ -280,6 +296,10 @@ class GestorExcelEstados:
                 self.df['Detalle Error'] = ''
             if 'Numero Pedido' not in self.df.columns:
                 self.df['Numero Pedido'] = ''
+
+            # Forzar tipo string para que siempre acepten texto
+            for col in ['Estado', 'Detalle Error', 'Numero Pedido']:
+                self.df[col] = self.df[col].astype(str).replace('nan', '')
             
             print(f"[OK] Excel cargado con {len(self.df)} filas")
             return True
