@@ -3143,26 +3143,25 @@ class ConsultasSAP:
             traceback.print_exc()
             return None
     
-    def obtener_todos_precios_portal(self, materiales_lista):
+    def _navegar_portal_paso3(self):
         """
-        Navega al portal de socios, hace login y obtiene precios de todos los materiales
-        de una sola vez, antes de entrar a SAP.
-
-        Asume que el driver ya está en la URL del portal.
-
-        Args:
-            materiales_lista: Lista de tuplas (codigo_material, cantidad)
+        Realiza la navegación completa en el portal hasta Paso 3:
+        login → Auteco → Pedidos → nuevo pedido → 550005491 → Paso 2 → Paso 3.
+        Debe llamarse solo cuando no se está ya en Paso 3.
 
         Returns:
-            Lista de dicts {codigo, cantidad, precio_sin_iva (str), precio_con_iva (int)}
-            o None si falla el login/navegación
+            True si la navegación fue exitosa, False si hubo error
         """
-        import re
         from selenium.common.exceptions import TimeoutException as _TimeoutException
         try:
-            print("\n--- Obteniendo precios del Portal de Socios (portal-first) ---")
+            # 0. Verificar que la sesión de Chrome esté activa antes de navegar
+            try:
+                _ = self.driver.window_handles
+            except Exception:
+                print("  [ERROR] Sesión de Chrome inactiva al entrar a _navegar_portal_paso3")
+                return False
 
-            # 1. Detectar si se requiere login (esperar 5s por el formulario)
+            # 1. Detectar si se requiere login
             login_requerido = False
             try:
                 WebDriverWait(self.driver, 5).until(
@@ -3172,7 +3171,7 @@ class ConsultasSAP:
             except _TimeoutException:
                 print("  [OK] Sesión del portal ya activa, omitiendo login")
 
-            # 2. Ingresar credenciales solo si es necesario
+            # 2. Login si es necesario
             if login_requerido:
                 print("  [INFO] Iniciando login en portal...")
                 campo_email = self.driver.find_element(By.ID, "j_username")
@@ -3193,7 +3192,7 @@ class ConsultasSAP:
                 boton_login.click()
                 print("  [OK] Login enviado")
 
-            # Esperar botón Auteco (punto de convergencia: aplica tras login y con sesión activa)
+            # Esperar botón Auteco (punto de convergencia)
             try:
                 WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.ID, "__button0-img"))
@@ -3223,24 +3222,29 @@ class ConsultasSAP:
                 print("  [OK] Click en 'Pedidos'")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer click en 'Pedidos': {str(e)}")
-                return None
+                return False
 
-            # 5. Click en botón de acción (__button2)
+            # 5. Click en botón de acción (Nuevo pedido)
+            # Selenium .click() despacha la secuencia completa de eventos de mouse que SAP Fiori
+            # necesita. JS element.click() solo dispara "click" y no abre el formulario correctamente.
             try:
-                boton_bdi = self.driver.find_element(By.ID, "__button2-BDI-content")
+                boton_bdi = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.ID, "__button2-BDI-content"))
+                )
                 try:
                     boton_bdi.click()
-                except:
+                except Exception:
                     boton_bdi.find_element(By.XPATH, "..").click()
-                time.sleep(1)
                 print("  [OK] Click en botón de acción")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer click en botón: {str(e)}")
-                return None
+                return False
 
             # 6. Escribir "R" en campo ventas y presionar Enter
             try:
-                campo_ventas = self.driver.find_element(By.ID, "container-PortalApp---Pedidos--comboVentas-inner")
+                campo_ventas = WebDriverWait(self.driver, 15).until(
+                    EC.element_to_be_clickable((By.ID, "container-PortalApp---Pedidos--comboVentas-inner"))
+                )
                 campo_ventas.click()
                 time.sleep(0.3)
                 campo_ventas.clear()
@@ -3256,9 +3260,9 @@ class ConsultasSAP:
                 print("  [OK] Campo ventas 'R' ingresado")
             except Exception as e:
                 print(f"  [ERROR] No se pudo completar campo ventas: {str(e)}")
-                return None
+                return False
 
-            # 7. Escribir "550005491" en campo de búsqueda
+            # 7. Escribir "550005491" en campo de búsqueda y presionar Enter
             try:
                 try:
                     WebDriverWait(self.driver, 15).until(
@@ -3273,20 +3277,28 @@ class ConsultasSAP:
                 time.sleep(0.3)
                 campo_busqueda.clear()
                 campo_busqueda.send_keys("550005491")
-                time.sleep(1.5)
-                print("  [OK] Búsqueda '550005491' ingresada")
+                time.sleep(0.5)
+                campo_busqueda.send_keys(Keys.ENTER)  # Disparar la búsqueda
+                # Esperar a que cargue la lista de resultados
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        EC.invisibility_of_element_located((By.ID, "container-PortalApp---Pedidos--page-busyIndicator"))
+                    )
+                except:
+                    time.sleep(3)
+                print("  [OK] Búsqueda '550005491' ingresada y ejecutada")
             except Exception as e:
                 print(f"  [ERROR] No se pudo escribir en campo de búsqueda: {str(e)}")
-                return None
+                return False
 
-            # 8. Doble click en celda resultado
+            # 8. Doble click en celda resultado (esperar que aparezca antes de clickear)
             try:
-                try:
-                    celda_resultado = self.driver.find_element(By.XPATH,
-                        "//td[contains(@class, 'sapMListTblCell')]//span[contains(@class, 'sapMText')]")
-                except:
-                    celda_resultado = self.driver.find_element(By.XPATH,
-                        "//td[contains(@class, 'sapMListTblCell') and contains(@id, '_cell0')]")
+                celda_resultado = WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        "//td[contains(@class, 'sapMListTblCell')]//span[contains(@class, 'sapMText')]"))
+                )
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", celda_resultado)
+                time.sleep(0.5)
                 ActionChains(self.driver).double_click(celda_resultado).perform()
                 try:
                     WebDriverWait(self.driver, 20).until(
@@ -3297,7 +3309,7 @@ class ConsultasSAP:
                 print("  [OK] Doble click en resultado, cargando detalle...")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer doble click en resultado: {str(e)}")
-                return None
+                return False
 
             # 9. Click en Paso 2
             try:
@@ -3331,7 +3343,7 @@ class ConsultasSAP:
                 print("  [OK] Click en 'Paso 2'")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer click en 'Paso 2': {str(e)}")
-                return None
+                return False
 
             # 10. Click en Paso 3
             try:
@@ -3377,12 +3389,55 @@ class ConsultasSAP:
                 print("  [OK] Paso 3 cargado")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer click en 'Paso 3': {str(e)}")
-                return None
+                return False
 
-            # 11. Para cada material, buscar y extraer precios
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Error en _navegar_portal_paso3: {str(e)}")
+            return False
+
+    def obtener_todos_precios_portal(self, materiales_lista, ya_inicializado=False):
+        """
+        Obtiene precios y disponibilidad de todos los materiales en el portal.
+
+        Args:
+            materiales_lista: Lista de tuplas (codigo_material, cantidad)
+            ya_inicializado: True si en este run ya se navegó exitosamente a Paso 3.
+                             Solo entonces se intenta reutilizar el estado del portal.
+                             False (defecto) siempre fuerza la navegación completa.
+
+        Returns:
+            Lista de dicts {codigo, cantidad, precio_sin_iva, precio_con_iva, no_disponible}
+            o None si falla
+        """
+        from selenium.common.exceptions import TimeoutException as _TimeoutException
+        try:
+            print("\n--- Obteniendo precios del Portal de Socios ---")
+
+            # Solo reutilizar el estado del portal si ya navegamos exitosamente en este run.
+            # Sin el flag, siempre navegamos desde cero (evita falsos positivos por cookies).
+            ya_en_paso3 = False
+            if ya_inicializado:
+                try:
+                    WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((By.ID, "container-PortalApp---Pedidos--searchFieldMat-I"))
+                    )
+                    ya_en_paso3 = True
+                    print("  [OK] Portal ya en Paso 3, omitiendo navegación completa")
+                except Exception:
+                    print("  [INFO] Paso 3 no detectado, renavedando...")
+            else:
+                print("  [INFO] Navegando hasta Paso 3 por primera vez...")
+
+            if not ya_en_paso3:
+                if not self._navegar_portal_paso3():
+                    return None
+
+            # Buscar precios y disponibilidad para cada material
             precios = []
             for material_codigo, cantidad in materiales_lista:
-                print(f"\n  >> Precio para material: {material_codigo} (cantidad: {cantidad})")
+                print(f"\n  >> Material: {material_codigo} (cantidad: {cantidad})")
                 resultado = self._buscar_precio_material_portal(material_codigo)
                 if resultado is None:
                     print(f"  [ERROR] No se pudo obtener precio para material {material_codigo}")
@@ -3391,9 +3446,11 @@ class ConsultasSAP:
                     'codigo': resultado['codigo'],
                     'cantidad': cantidad,
                     'precio_sin_iva': resultado['precio_sin_iva'],
-                    'precio_con_iva': resultado['precio_con_iva']
+                    'precio_con_iva': resultado['precio_con_iva'],
+                    'no_disponible': resultado.get('no_disponible', False)
                 })
-                print(f"  [OK] Material {material_codigo}: sin IVA={resultado['precio_sin_iva']}, con IVA={resultado['precio_con_iva']}")
+                disponibilidad_txt = "NO DISPONIBLE" if resultado.get('no_disponible') else "DISPONIBLE"
+                print(f"  [OK] Material {material_codigo}: sin IVA={resultado['precio_sin_iva']}, con IVA={resultado['precio_con_iva']} | Página 1: {disponibilidad_txt}")
 
             print(f"\n  [OK] Precios obtenidos para {len(precios)} material(es)")
             return precios
@@ -3518,6 +3575,45 @@ class ConsultasSAP:
                     self.driver.execute_script("arguments[0].click();", span_nuevo)
                 time.sleep(3)
 
+            # Verificar disponibilidad en página 1
+            # Cantidad > 0 => disponible en tienda => NO crear pedido
+            # Cantidad == 0 => no disponible => SÍ crear pedido en SAP
+            no_disponible = False
+            try:
+                resultado_disp = self.driver.execute_script("""
+                    (() => {
+                        const cantidadElement = $($(".sapMObjectIdentifierTopRow")[3]).next();
+                        if (cantidadElement && cantidadElement.length > 0) {
+                            const cantidadTexto = cantidadElement.text().trim();
+                            const cantidadNum = cantidadTexto.replace(/[^0-9]/g, "");
+                            return {
+                                textoOriginal: cantidadTexto,
+                                cantidad: cantidadNum || "0",
+                                disponible: !!(cantidadNum && parseInt(cantidadNum) > 0)
+                            };
+                        }
+                        return { error: "No encontré el elemento de cantidad" };
+                    })();
+                """)
+
+                if resultado_disp and 'error' not in resultado_disp:
+                    cantidad_stock = resultado_disp.get('cantidad', '0')
+                    disponible = resultado_disp.get('disponible', False)
+                    texto_original = resultado_disp.get('textoOriginal', '')
+                    if disponible:
+                        no_disponible = False
+                        print(f"    [INFO] Material {codigo_actual}: DISPONIBLE en página 1 (cantidad: {texto_original}) → no se creará pedido")
+                    else:
+                        no_disponible = True
+                        print(f"    [INFO] Material {codigo_actual}: NO DISPONIBLE en página 1 (cantidad: {texto_original}) → se creará pedido en SAP")
+                else:
+                    error_msg = resultado_disp.get('error', 'desconocido') if resultado_disp else 'sin respuesta'
+                    print(f"    [WARN] No se pudo leer cantidad de {codigo_actual}: {error_msg} → se asume no disponible")
+                    no_disponible = True
+            except Exception as e_disp:
+                print(f"    [WARN] Error al verificar disponibilidad de {codigo_actual}: {str(e_disp)[:100]} → se asume no disponible")
+                no_disponible = True
+
             # Extraer precios
             spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")
             precio_sin_iva_texto = None
@@ -3537,11 +3633,14 @@ class ConsultasSAP:
             precio_sin_iva_limpio = re.sub(r'[^\d]', '', precio_sin_iva_texto)
             precio_con_iva_valor = int(re.sub(r'[^\d]', '', precio_con_iva_texto)) if precio_con_iva_texto else None
 
-            return {
+            resultado = {
                 'codigo': codigo_actual,
                 'precio_sin_iva': precio_sin_iva_limpio,
-                'precio_con_iva': precio_con_iva_valor
+                'precio_con_iva': precio_con_iva_valor,
+                'no_disponible': no_disponible
             }
+
+            return resultado
 
         except Exception as e:
             print(f"    [ERROR] Error al buscar precio de material {material}: {str(e)}")

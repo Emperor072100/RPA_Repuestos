@@ -203,13 +203,23 @@ def procesar_referencia(cliente: Dict) -> Dict:
     """
     import re
     
-    # Buscar columna Referencia o repuesto
+    # Buscar columna de repuesto — dos pasadas para evitar confundir
+    # "Referencia moto" (nombre de moto) con "Repuestos" (código numérico)
     referencia_str = None
+
+    # Pasada 1: columna que contenga "repuesto" (ej: "Repuestos")
     for columna, valor in cliente.items():
-        col_lower = columna.lower()
-        if 'referencia' in col_lower or 'repuesto' in col_lower:
+        if 'repuesto' in columna.lower():
             referencia_str = str(valor).strip()
             break
+
+    # Pasada 2: columna "Referencia" pero que NO sea "Referencia moto" ni similar
+    if not referencia_str:
+        for columna, valor in cliente.items():
+            col_lower = columna.lower()
+            if 'referencia' in col_lower and 'moto' not in col_lower:
+                referencia_str = str(valor).strip()
+                break
     
     if not referencia_str or referencia_str == 'nan':
         return {"materiales": [], "descartar": True}

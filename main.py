@@ -45,10 +45,11 @@ class RPA_AUTECO:
         self.driver_sap = None
         self.ruta_excel = ruta_excel
         self.clientes = []
-        self.gestor_excel = None  # Gestor para actualizar estados en Excel
+        self.gestor_excel = None
         self.solo_filas = solo_filas
         self.solo_cedulas = solo_cedulas
         self.limite = limite
+        self.portal_paso3_listo = False  # True solo tras la primera navegación exitosa en este run
     
     def cargar_clientes(self):
         """
@@ -590,6 +591,37 @@ class RPA_AUTECO:
             traceback.print_exc()
             return False
     
+    def _sesion_viva(self) -> bool:
+        """Comprueba si la sesión de Chrome sigue activa"""
+        try:
+            _ = self.driver_sap.driver.window_handles
+            return True
+        except Exception:
+            return False
+
+    def _abrir_tabs(self, url_portal: str):
+        """Abre (o reabre) las dos pestañas del navegador y devuelve sus handles"""
+        self.driver_sap.ir_a_url(url_portal)
+        portal_tab = self.driver_sap.driver.current_window_handle
+        self.driver_sap.driver.execute_script("window.open('', '_blank');")
+        sap_tab = [h for h in self.driver_sap.driver.window_handles if h != portal_tab][0]
+        self.driver_sap.driver.switch_to.window(sap_tab)
+        self.driver_sap.driver.get(URL_SAP)
+        return portal_tab, sap_tab
+
+    def _recuperar_sesion(self, url_portal: str):
+        """Recreates the Chrome driver and re-opens both tabs after a crash"""
+        print("[RECOVER] Recreando sesión de Chrome...")
+        try:
+            self.driver_sap.cerrar_driver()
+        except Exception:
+            pass
+        if not self.driver_sap.crear_driver():
+            raise RuntimeError("No se pudo recrear el driver de Chrome")
+        portal_tab, sap_tab = self._abrir_tabs(url_portal)
+        print("[RECOVER] Sesión recreada correctamente")
+        return portal_tab, sap_tab
+
     def ejecutar(self):
         """
         Ejecuta el flujo completo del RPA
@@ -598,7 +630,7 @@ class RPA_AUTECO:
             print("="*60)
             print("INICIANDO RPA AUTECO")
             print("="*60)
-            
+
             # 0. Cargar clientes del Excel
             if not self.cargar_clientes():
                 return False
@@ -616,6 +648,11 @@ class RPA_AUTECO:
                 return False
 
             url_portal = "https://portal-socios-auteco-portal-approuter.cfapps.us10.hana.ondemand.com/autecoPortalApp/index.html"
+
+            # Abrir portal en pestaña 1 y SAP en pestaña 2
+            print("\n>> Inicializando pestañas (Portal + SAP)...")
+            portal_tab, sap_tab = self._abrir_tabs(url_portal)
+            print("[OK] Dos pestañas abiertas: Portal (pestaña 1) y SAP (pestaña 2)")
 
             try:
                 for idx, cliente in enumerate(self.clientes, start=1):
@@ -636,11 +673,23 @@ class RPA_AUTECO:
                             continue
                         materiales_para_portal = ref_data_previo["materiales"]
 
-                        # 1. Navegar al portal y obtener precios
+                        # 1. Obtener precios en pestaña portal (sin renavegar si ya está en Paso 3)
                         print("\n1. Obteniendo precios del portal...")
-                        self.driver_sap.ir_a_url(url_portal)
+                        if not self._sesion_viva():
+                            print("[WARN] Sesión de Chrome caída, recreando...")
+                            portal_tab, sap_tab = self._recuperar_sesion(url_portal)
+                            self.portal_paso3_listo = False  # Chrome nuevo = navegación nueva
+                        self.driver_sap.driver.switch_to.window(portal_tab)
                         consultas_portal = ConsultasSAP(self.driver_sap)
-                        precios_portal = consultas_portal.obtener_todos_precios_portal(materiales_para_portal)
+                        precios_portal = consultas_portal.obtener_todos_precios_portal(
+                            materiales_para_portal,
+                            ya_inicializado=self.portal_paso3_listo
+                        )
+
+                        if precios_portal is not None:
+                            self.portal_paso3_listo = True  # Navegación exitosa en este run
+                        else:
+                            self.portal_paso3_listo = False  # Resetear para que el siguiente cliente renavegue
 
                         if not precios_portal:
                             print(f"[ERROR] No se pudieron obtener precios del portal para cliente {idx}")
@@ -650,9 +699,45 @@ class RPA_AUTECO:
                                 self.gestor_excel.actualizar_estado(indice_excel_previo, "Error - Portal sin precio", "No se obtuvieron precios del portal")
                             continue
 
-                        # 2. Navegar a SAP
-                        print("\n2. Navegando a SAP...")
-                        self.driver_sap.ir_a_url(URL_SAP)
+                        # Filtrar solo materiales NO DISPONIBLES en página 1
+                        materiales_no_disponibles = [p for p in precios_portal if p.get('no_disponible', False)]
+                        materiales_disponibles = [p for p in precios_portal if not p.get('no_disponible', False)]
+
+                        if materiales_disponibles:
+                            codigos_disponibles = ', '.join(p['codigo'] for p in materiales_disponibles)
+                            print(f"  [INFO] Materiales DISPONIBLES en página 1 (no se pedirán): {codigos_disponibles}")
+
+                        if not materiales_no_disponibles:
+                            print(f"[SKIP] Todos los materiales están disponibles en página 1 → no se crea pedido SAP")
+                            indice_excel_previo = cliente.get("_indice_original", idx - 1)
+                            if self.gestor_excel:
+                                self.gestor_excel.actualizar_estado(
+                                    indice_excel_previo,
+                                    "Omitido - Disponible en tienda",
+                                    f"Disponibles en página 1: {', '.join(p['codigo'] for p in precios_portal)}"
+                                )
+                            clientes_fallidos += 1
+                            continue
+
+                        # Solo continuar con los materiales no disponibles
+                        precios_portal = materiales_no_disponibles
+                        print(f"  [INFO] Se crearán pedidos SAP para {len(precios_portal)} material(es) no disponible(s)")
+
+                        # 2. Cambiar a pestaña SAP (portal queda intacto en Paso 3)
+                        print("\n2. Cambiando a pestaña SAP...")
+                        if not self._sesion_viva():
+                            print("[WARN] Sesión de Chrome caída, recreando...")
+                            portal_tab, sap_tab = self._recuperar_sesion(url_portal)
+                            self.portal_paso3_listo = False
+                        try:
+                            self.driver_sap.driver.switch_to.window(sap_tab)
+                        except Exception as e_sw:
+                            if "invalid session" in str(e_sw).lower() or "session deleted" in str(e_sw).lower() or "no such window" in str(e_sw).lower():
+                                print("[WARN] Handle SAP inválido, recreando sesión...")
+                                portal_tab, sap_tab = self._recuperar_sesion(url_portal)
+                                self.driver_sap.driver.switch_to.window(sap_tab)
+                            else:
+                                raise
 
                         # 3. Login (inteligente: omite si la sesion ya esta activa)
                         print("\n3. Verificando sesion SAP...")
