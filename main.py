@@ -654,6 +654,39 @@ class RPA_AUTECO:
             portal_tab, sap_tab = self._abrir_tabs(url_portal)
             print("[OK] Dos pestañas abiertas: Portal (pestaña 1) y SAP (pestaña 2)")
 
+            # ============================================================
+            # PRECARGA: obtener TODOS los precios del portal de una sola vez
+            # ============================================================
+            print("\n>> Precargando precios del portal para todos los clientes...")
+            self.driver_sap.driver.switch_to.window(portal_tab)
+            consultas_preload = ConsultasSAP(self.driver_sap)
+
+            # Recopilar materiales únicos de todos los clientes
+            materiales_unicos = {}
+            for c in self.clientes:
+                rd = procesar_referencia(c)
+                if not rd['descartar']:
+                    for mat, cant in rd['materiales']:
+                        if mat not in materiales_unicos:
+                            materiales_unicos[mat] = cant
+
+            lista_todos_materiales = list(materiales_unicos.items())
+            print(f"  [INFO] {len(lista_todos_materiales)} material(es) únicos entre todos los clientes")
+
+            # Intentar la precarga hasta 3 veces si falla la navegación al portal
+            cache_precios_portal = {}
+            for intento_preload in range(3):
+                cache_precios_portal = consultas_preload.precargar_precios_batch(lista_todos_materiales)
+                encontrados = sum(1 for v in cache_precios_portal.values() if v is not None)
+                if encontrados > 0:
+                    break
+                print(f"  [WARN] Precarga intento {intento_preload+1}/3 sin resultados, reintentando en 5s...")
+                time.sleep(5)
+
+            encontrados = sum(1 for v in cache_precios_portal.values() if v is not None)
+            print(f"[OK] Cache del portal listo: {encontrados}/{len(cache_precios_portal)} materiales con precio")
+            # ============================================================
+
             try:
                 for idx, cliente in enumerate(self.clientes, start=1):
                     print("\n" + "="*60)
@@ -673,25 +706,19 @@ class RPA_AUTECO:
                             continue
                         materiales_para_portal = ref_data_previo["materiales"]
 
-                        # 1. Obtener precios en pestaña portal (sin renavegar si ya está en Paso 3)
-                        print("\n1. Obteniendo precios del portal...")
-                        if not self._sesion_viva():
-                            print("[WARN] Sesión de Chrome caída, recreando...")
-                            portal_tab, sap_tab = self._recuperar_sesion(url_portal)
-                            self.portal_paso3_listo = False  # Chrome nuevo = navegación nueva
-                        self.driver_sap.driver.switch_to.window(portal_tab)
-                        consultas_portal = ConsultasSAP(self.driver_sap)
-                        precios_portal = consultas_portal.obtener_todos_precios_portal(
-                            materiales_para_portal,
-                            ya_inicializado=self.portal_paso3_listo
-                        )
+                        # 1. Obtener precios desde cache precargado (sin tocar el portal)
+                        print("\n1. Obteniendo precios del portal (cache)...")
+                        precios_portal = []
+                        alguno_fallo = False
+                        for mat, cant in materiales_para_portal:
+                            info = cache_precios_portal.get(mat)
+                            if info is None:
+                                print(f"  [ERROR] Material {mat} sin precio en cache del portal")
+                                alguno_fallo = True
+                                break
+                            precios_portal.append({**info, 'cantidad': cant})
 
-                        if precios_portal is not None:
-                            self.portal_paso3_listo = True  # Navegación exitosa en este run
-                        else:
-                            self.portal_paso3_listo = False  # Resetear para que el siguiente cliente renavegue
-
-                        if not precios_portal:
+                        if alguno_fallo or not precios_portal:
                             print(f"[ERROR] No se pudieron obtener precios del portal para cliente {idx}")
                             clientes_fallidos += 1
                             indice_excel_previo = cliente.get("_indice_original", idx - 1)

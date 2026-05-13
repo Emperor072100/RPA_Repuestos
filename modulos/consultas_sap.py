@@ -53,10 +53,10 @@ class ConsultasSAP:
                         elemento = self.driver.find_element(By.ID, 'ToolbarOkCode')
                         print(f"  [OK] Campo encontrado en iframe {idx}")
                         
-                        # Escribir VA01
-                        print(">> Escribiendo VA01...")
+                        # Escribir /nVA01 para forzar navegación limpia descartando estado anterior
+                        print(">> Escribiendo /nVA01...")
                         elemento.clear()
-                        elemento.send_keys('VA01')
+                        elemento.send_keys('/nVA01')
                         time.sleep(0.5)
                         
                         # Presionar Enter
@@ -85,9 +85,9 @@ class ConsultasSAP:
                 # Si no está en iframes, intentar directamente
                 print("  Intentando en contenido principal...")
                 elemento = self.driver.find_element(By.ID, 'ToolbarOkCode')
-                print(">> Escribiendo VA01...")
+                print(">> Escribiendo /nVA01...")
                 elemento.clear()
-                elemento.send_keys('VA01')
+                elemento.send_keys('/nVA01')
                 time.sleep(0.5)
                 
                 print(">> Presionando Enter...")
@@ -103,7 +103,7 @@ class ConsultasSAP:
                 
                 # Alternativa: buscar por name o cualquier otro atributo
                 campo = self.driver.find_element(By.NAME, 'ToolbarOkCode')
-                campo.send_keys('VA01')
+                campo.send_keys('/nVA01')
                 campo.send_keys(Keys.RETURN)
                 try:
                     WebDriverWait(self.driver, 15).until(
@@ -2589,37 +2589,61 @@ class ConsultasSAP:
             # Versión sin la abreviatura de departamento entre paréntesis
             ciudad_base = re.sub(r'\s*\([^)]*\)', '', ciudad_norm).strip()
 
+            # Pre-procesamiento: si el municipio incluye el nombre del departamento al final
+            # (ej: "SAN JOSE DE CUCUTA NORTE DE SANTANDER"), intentar extraer solo la ciudad.
+            _DEPTOS = [
+                'NORTE DE SANTANDER', 'VALLE DEL CAUCA', 'SAN ANDRES', 'LA GUAJIRA',
+                'ANTIOQUIA', 'ATLANTICO', 'BOLIVAR', 'BOYACA', 'CALDAS', 'CAQUETA',
+                'CASANARE', 'CAUCA', 'CESAR', 'CHOCO', 'CORDOBA', 'CUNDINAMARCA',
+                'GUAINIA', 'GUAVIARE', 'HUILA', 'MAGDALENA', 'META', 'NARINO',
+                'PUTUMAYO', 'QUINDIO', 'RISARALDA', 'SANTANDER', 'SUCRE', 'TOLIMA',
+                'VAUPES', 'VICHADA', 'AMAZONAS', 'ARAUCA', 'BOGOTA',
+            ]
+            ciudad_solo = ciudad_base
+            for depto in _DEPTOS:
+                if ciudad_base.endswith(' ' + depto):
+                    ciudad_solo = ciudad_base[:-(len(depto) + 1)].strip()
+                    break
+
             # Estrategia 1: clave exacta con nombre completo
             tarifa = _TARIFAS_FLETE.get(ciudad_norm)
             if tarifa:
                 print(f"  [OK] Match exacto: '{ciudad_norm}' -> {tarifa:,} sin IVA")
                 return tarifa
 
-            # Estrategia 2: clave exacta sin departamento
+            # Estrategia 2: clave exacta sin departamento en paréntesis
             tarifa = _TARIFAS_FLETE.get(ciudad_base)
             if tarifa:
-                print(f"  [OK] Match sin depto: '{ciudad_base}' -> {tarifa:,} sin IVA")
+                print(f"  [OK] Match sin depto (paréntesis): '{ciudad_base}' -> {tarifa:,} sin IVA")
                 return tarifa
 
-            # Estrategia 3: alguna clave del diccionario empieza por la ciudad buscada
+            # Estrategia 3: clave exacta con solo el municipio (sin departamento al final)
+            if ciudad_solo != ciudad_base:
+                tarifa = _TARIFAS_FLETE.get(ciudad_solo)
+                if tarifa:
+                    print(f"  [OK] Match ciudad sola: '{ciudad_solo}' -> {tarifa:,} sin IVA")
+                    return tarifa
+
+            # Estrategia 4: alguna clave del dict empieza por el nombre de ciudad
             for clave, valor in _TARIFAS_FLETE.items():
-                if clave.startswith(ciudad_norm) or clave.startswith(ciudad_base):
+                if clave.startswith(ciudad_solo) or clave.startswith(ciudad_base):
                     print(f"  [OK] Match prefijo: '{clave}' -> {valor:,} sin IVA")
                     return valor
 
-            # Estrategia 4: palabra larga (>3 chars) contenida en alguna clave
-            palabras = [p for p in ciudad_base.split() if len(p) > 3]
+            # Estrategia 5: alguna clave del dict contenida en ciudad_solo
+            # Ordenar por longitud desc para preferir coincidencias más específicas
+            for clave, valor in sorted(_TARIFAS_FLETE.items(), key=lambda x: len(x[0]), reverse=True):
+                if len(clave) > 4 and clave in ciudad_solo:
+                    print(f"  [OK] Match inverso (ciudad_solo): '{clave}' en '{ciudad_solo}' -> {valor:,} sin IVA")
+                    return valor
+
+            # Estrategia 6: palabra larga (>4 chars) de ciudad_solo contenida en alguna clave
+            palabras = sorted([p for p in ciudad_solo.split() if len(p) > 4], key=len, reverse=True)
             for palabra in palabras:
                 for clave, valor in _TARIFAS_FLETE.items():
                     if palabra in clave:
                         print(f"  [OK] Match parcial '{palabra}' en '{clave}' -> {valor:,} sin IVA")
                         return valor
-
-            # Estrategia 5: alguna clave del diccionario contenida en la ciudad buscada
-            for clave, valor in _TARIFAS_FLETE.items():
-                if len(clave) > 3 and clave in ciudad_norm:
-                    print(f"  [OK] Match inverso: '{clave}' en '{ciudad_norm}' -> {valor:,} sin IVA")
-                    return valor
 
             print(f"  [WARN] Ciudad '{ciudad}' no encontrada en el listado de tarifas")
             return None
@@ -3192,15 +3216,19 @@ class ConsultasSAP:
                 boton_login.click()
                 print("  [OK] Login enviado")
 
-            # Esperar botón Auteco (punto de convergencia)
+            # Esperar botón Auteco (punto de convergencia) y dar tiempo a SAP UI5 para inicializar
             try:
                 WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.ID, "__button0-img"))
                 )
             except:
                 time.sleep(3)
+            # Pausa extra para que el framework SAP UI5 termine de registrar event handlers
             if login_requerido:
+                time.sleep(4)
                 print("  [OK] Login exitoso")
+            else:
+                time.sleep(1)
 
             # 3. Click en imagen Auteco
             try:
@@ -3218,7 +3246,7 @@ class ConsultasSAP:
                 span_pedidos = self.driver.find_element(By.XPATH,
                     "//span[@class='sapMText sapTntNavLIText sapMTextNoWrap' and text()='Pedidos']")
                 span_pedidos.click()
-                time.sleep(1)
+                time.sleep(3)  # Espera fija para que SAP UI5 termine de renderizar la pantalla
                 print("  [OK] Click en 'Pedidos'")
             except Exception as e:
                 print(f"  [ERROR] No se pudo hacer click en 'Pedidos': {str(e)}")
@@ -3460,6 +3488,46 @@ class ConsultasSAP:
             import traceback
             traceback.print_exc()
             return None
+
+    def precargar_precios_batch(self, lista_materiales):
+        """
+        Navega al portal UNA SOLA VEZ y obtiene precios de todos los materiales en batch.
+
+        Args:
+            lista_materiales: Lista de tuplas (material_code, cantidad)
+
+        Returns:
+            Dict {material_code: {codigo, precio_sin_iva, precio_con_iva, no_disponible} o None si falló}
+        """
+        try:
+            print("\n--- Precargando precios del portal (batch) ---")
+            print(f"  [INFO] {len(lista_materiales)} material(es) a consultar")
+            print("  [INFO] Navegando hasta Paso 3...")
+            if not self._navegar_portal_paso3():
+                print("  [ERROR] No se pudo navegar al Paso 3 del portal")
+                return {mat: None for mat, _ in lista_materiales}
+
+            cache = {}
+            for material_codigo, cantidad in lista_materiales:
+                print(f"\n  >> Material: {material_codigo}")
+                resultado = self._buscar_precio_material_portal(material_codigo)
+                if resultado is None:
+                    print(f"  [WARN] No se pudo obtener precio para {material_codigo}")
+                    cache[material_codigo] = None
+                else:
+                    cache[material_codigo] = resultado
+                    disponibilidad = "NO DISPONIBLE" if resultado.get('no_disponible') else "DISPONIBLE"
+                    print(f"  [OK] {material_codigo}: sin IVA={resultado['precio_sin_iva']}, con IVA={resultado['precio_con_iva']} | {disponibilidad}")
+
+            encontrados = sum(1 for v in cache.values() if v is not None)
+            print(f"\n  [OK] Precios precargados: {encontrados}/{len(cache)} material(es)")
+            return cache
+
+        except Exception as e:
+            print(f"[ERROR] Error en precargar_precios_batch: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {mat: None for mat, _ in lista_materiales}
 
     def _buscar_precio_material_portal(self, material):
         """

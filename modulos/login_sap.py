@@ -11,71 +11,88 @@ class LoginSAP:
     """
     Clase para automatizar el login en SAP NetWeaver
     """
-    
+
     def __init__(self, driver_sap):
-        """
-        Inicializa el manejador de login
-        
-        Args:
-            driver_sap: Instancia de la clase DriverSAP
-        """
         self.driver_sap = driver_sap
         self.driver = driver_sap.driver
-    
+
+    def _sesion_sap_activa(self) -> bool:
+        """
+        Verifica si la sesión SAP ya está activa buscando ToolbarOkCode
+        en el documento principal Y en todos los iframes disponibles.
+        Deja el driver en default_content al terminar.
+        """
+        try:
+            self.driver.switch_to.default_content()
+            # Intentar en documento principal
+            if self.driver.find_elements(By.ID, 'ToolbarOkCode'):
+                return True
+            # Buscar en cada iframe
+            iframes = self.driver.find_elements(By.TAG_NAME, 'iframe')
+            for iframe in iframes:
+                try:
+                    self.driver.switch_to.frame(iframe)
+                    if self.driver.find_elements(By.ID, 'ToolbarOkCode'):
+                        return True
+                except Exception:
+                    pass
+                finally:
+                    self.driver.switch_to.default_content()
+        except Exception:
+            pass
+        return False
+
     def iniciar_sesion(self, usuario: str, contraseña: str) -> bool:
         """
-        Realiza el login en SAP con las credenciales proporcionadas
-
-        Args:
-            usuario: Nombre de usuario
-            contraseña: Contraseña del usuario
+        Realiza el login en SAP con las credenciales proporcionadas.
+        Si la sesión ya está activa (ToolbarOkCode presente en algún iframe),
+        omite el login y retorna True inmediatamente.
 
         Returns:
-            True si el login fue exitoso, False si fallo
+            True si el login fue exitoso o ya estaba activo
         """
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
         try:
             print("\n--- Verificando sesión SAP ---")
 
-            # Esperar a que aparezca la pantalla principal o el formulario de login
-            wait = WebDriverWait(self.driver, 20)
-            wait.until(
-                lambda d: d.find_elements(By.ID, 'ToolbarOkCode') or d.find_elements(By.ID, 'sap-user')
-            )
+            # Salir de cualquier iframe activo
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
 
-            # Si ya hay sesión activa (ToolbarOkCode visible), omitir login
-            if self.driver.find_elements(By.ID, 'ToolbarOkCode'):
+            # Comprobar si la sesión ya está activa (ToolbarOkCode en iframe)
+            if self._sesion_sap_activa():
                 print("[OK] Sesión SAP ya activa, omitiendo login")
                 return True
 
+            # Verificar si la página de login está disponible
+            wait = WebDriverWait(self.driver, 20)
+            try:
+                wait.until(
+                    lambda d: d.find_elements(By.ID, 'sap-user')
+                )
+            except Exception:
+                # Si no aparece login form, verificar una vez más si la sesión está activa
+                if self._sesion_sap_activa():
+                    print("[OK] Sesión SAP activa (detectada tarde), omitiendo login")
+                    return True
+                print("[ERROR] No se encontró ni sesión activa ni formulario de login")
+                return False
+
             print(">> Sesión no activa, iniciando login...")
-            # sap-user ya confirmado presente por el lambda anterior
 
-            # Ingresamos el usuario por ID
             print(">> Ingresando usuario...")
-            self.driver_sap.escribir_en_elemento(
-                'sap-user',
-                usuario,
-                tipo_selector=By.ID
-            )
+            self.driver_sap.escribir_en_elemento('sap-user', usuario, tipo_selector=By.ID)
 
-            # Ingresamos la contraseña por ID
             print(">> Ingresando contraseña...")
-            self.driver_sap.escribir_en_elemento(
-                'sap-password',
-                contraseña,
-                tipo_selector=By.ID
-            )
+            self.driver_sap.escribir_en_elemento('sap-password', contraseña, tipo_selector=By.ID)
 
-            # Click en el botón de login - Intentar múltiples selectores
             print(">> Haciendo click en botón de acceso...")
-
             try:
                 botones = self.driver.find_elements(By.TAG_NAME, "button")
                 boton_acceder = None
-
                 for boton in botones:
                     if "Acceder" in boton.text or "acceder" in boton.text.lower():
                         boton_acceder = boton
@@ -86,7 +103,7 @@ class LoginSAP:
                     try:
                         boton_acceder.click()
                         print("[OK] Click en botón Acceder completado")
-                    except:
+                    except Exception:
                         self.driver.execute_script("arguments[0].click();", boton_acceder)
                         print("[OK] Click por JavaScript en botón Acceder")
                 else:
@@ -97,7 +114,6 @@ class LoginSAP:
                 print(f"[ERROR] Error al hacer click: {str(e)}")
                 print("[WARN] Continuando con el flujo...")
 
-            # Esperar a que aparezca un elemento de la página principal de SAP (no sleep fijo)
             print(">> Esperando a que se complete el login...")
             if self.verificar_login_exitoso():
                 print("[OK] Login exitoso en SAP")
@@ -112,29 +128,24 @@ class LoginSAP:
 
     def verificar_login_exitoso(self) -> bool:
         """
-        Verifica si el login fue exitoso esperando un elemento de la página principal
-
-        Returns:
-            True si el login fue exitoso
+        Verifica si el login fue exitoso esperando ToolbarOkCode en iframes.
         """
         from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
         try:
-            wait = WebDriverWait(self.driver, 20)
-            # Esperar a que aparezca el campo de comandos SAP (indica login exitoso)
-            try:
-                wait.until(EC.presence_of_element_located((By.ID, 'ToolbarOkCode')))
-                print("[OK] Verificación de login completada")
-                return True
-            except:
-                pass
+            # Esperar hasta 20s a que ToolbarOkCode aparezca en algún iframe
+            for _ in range(40):  # 40 × 0.5s = 20s
+                if self._sesion_sap_activa():
+                    print("[OK] Verificación de login completada")
+                    return True
+                time.sleep(0.5)
 
             # Fallback: verificar si hay error explícito
             try:
+                self.driver.switch_to.default_content()
                 error_element = self.driver.find_element(By.CLASS_NAME, 'error')
                 print("[ERROR] Página de error detectada")
                 return False
-            except:
+            except Exception:
                 pass
 
             print("[OK] Verificación de login completada")
