@@ -4,7 +4,7 @@ Configuración de credenciales y URLs del RPA
 
 # Credenciales de acceso al sistema SAP
 USUARIO = "CANALESAUM36"
-CONTRASEÑA = "Andes2026//"
+CONTRASEÑA = "4uT3co2026++"
 
 # URL del aplicativo
 URL_SAP = "https://erp.sap.auteco.com.co/sap/bc/gui/sap/its/webgui?sap-client=300&sap-language=ES"

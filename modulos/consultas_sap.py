@@ -29,6 +29,7 @@ class ConsultasSAP:
         """
         self.driver_sap = driver_sap
         self.driver = driver_sap.driver
+        self._portal_recargado = False
     
     def buscar_va01(self):
         """
@@ -3502,6 +3503,16 @@ class ConsultasSAP:
         try:
             print("\n--- Precargando precios del portal (batch) ---")
             print(f"  [INFO] {len(lista_materiales)} material(es) a consultar")
+
+            # La página del portal puede quedar en blanco al abrirse por primera vez.
+            # Solo en la primera llamada: esperar 5s y recargar.
+            if not self._portal_recargado:
+                print("  [INFO] Esperando 5s y recargando portal para asegurar carga correcta...")
+                time.sleep(5)
+                self.driver.refresh()
+                time.sleep(3)
+                self._portal_recargado = True
+
             print("  [INFO] Navegando hasta Paso 3...")
             if not self._navegar_portal_paso3():
                 print("  [ERROR] No se pudo navegar al Paso 3 del portal")
@@ -3564,18 +3575,44 @@ class ConsultasSAP:
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", input_busqueda)
             time.sleep(0.5)
 
-            try:
-                input_busqueda.click()
-                time.sleep(0.3)
-                input_busqueda.clear()
-                time.sleep(0.2)
-                input_busqueda.send_keys(material)
-            except:
-                self.driver.execute_script(f"arguments[0].value = '{material}';", input_busqueda)
-                self.driver.execute_script(
-                    "arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", input_busqueda)
+            # Asignar valor completo de una vez (igual que en consola) para que SAP Fiori filtre correctamente
+            self.driver.execute_script("""
+                arguments[0].value = arguments[1];
+                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+            """, input_busqueda, str(material))
 
-            time.sleep(2)
+            time.sleep(3)
+
+# Leer cantidad desde vista de lista (antes de navegar al detalle)
+            no_disponible = True
+            try:
+                resultado_disp = self.driver.execute_script("""
+                    const rows = document.querySelectorAll(".sapMObjectIdentifierTopRow");
+                    const targetRow = rows[3];
+                    const cantidadElement = targetRow ? targetRow.nextElementSibling : null;
+                    if (cantidadElement) {
+                        const cantidadTexto = cantidadElement.textContent.trim();
+                        const cantidadNum = cantidadTexto.replace(/[^0-9]/g, "");
+                        return {
+                            textoOriginal: cantidadTexto,
+                            cantidad: cantidadNum || "0",
+                            disponible: !!(cantidadNum && parseInt(cantidadNum) > 0)
+                        };
+                    }
+                    return { error: "No se encontro rows[3] o su siguiente hermano" };
+                """)
+                if resultado_disp and 'error' not in resultado_disp:
+                    disponible = resultado_disp.get('disponible', False)
+                    texto_original = resultado_disp.get('textoOriginal', '')
+                    no_disponible = not disponible
+                    estado_txt = "DISPONIBLE en dealer" if disponible else "NO DISPONIBLE en dealer"
+                    print(f"    [INFO] Material {material}: {estado_txt} (cantidad: {texto_original})")
+                else:
+                    error_msg = resultado_disp.get('error', 'desconocido') if resultado_disp else 'sin respuesta'
+                    print(f"    [WARN] No se pudo leer cantidad de {material}: {error_msg} → se asume no disponible")
+            except Exception as e_disp:
+                print(f"    [WARN] Error al verificar disponibilidad de {material}: {str(e_disp)[:100]} → se asume no disponible")
 
             # Click en span con código
             codigo_actual = material
@@ -3631,8 +3668,39 @@ class ConsultasSAP:
                     self.driver.execute_script(f"arguments[0].value = '{codigo_actual}';", input_reintentar)
                     self.driver.execute_script(
                         "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));", input_reintentar)
+                    self.driver.execute_script(
+                        "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));", input_reintentar)
 
                 time.sleep(2)
+
+                # Releer cantidad para el código reemplazante (desde vista de lista)
+                try:
+                    resultado_reemplazo = self.driver.execute_script("""
+                        (() => {
+                            const cantidadElement = $($(".sapMObjectIdentifierTopRow")[3]).next();
+                            if (cantidadElement && cantidadElement.length > 0) {
+                                const cantidadTexto = cantidadElement.text().trim();
+                                const cantidadNum = cantidadTexto.replace(/[^0-9]/g, "");
+                                return {
+                                    textoOriginal: cantidadTexto,
+                                    cantidad: cantidadNum || "0",
+                                    disponible: !!(cantidadNum && parseInt(cantidadNum) > 1)
+                                };
+                            }
+                            return { error: "No encontré el elemento de cantidad" };
+                        })();
+                    """)
+                    if resultado_reemplazo and 'error' not in resultado_reemplazo:
+                        disponible_r = resultado_reemplazo.get('disponible', False)
+                        texto_r = resultado_reemplazo.get('textoOriginal', '')
+                        no_disponible = not disponible_r
+                        estado_r = "DISPONIBLE en dealer" if disponible_r else "NO DISPONIBLE en dealer"
+                        print(f"    [INFO] Reemplazante {codigo_actual}: {estado_r} (cantidad: {texto_r})")
+                    else:
+                        error_r = resultado_reemplazo.get('error', 'desconocido') if resultado_reemplazo else 'sin respuesta'
+                        print(f"    [WARN] No se pudo leer cantidad del reemplazante {codigo_actual}: {error_r} → se mantiene valor anterior")
+                except Exception as e_r:
+                    print(f"    [WARN] Error verificando disponibilidad del reemplazante {codigo_actual}: {str(e_r)[:100]}")
 
                 span_nuevo = self.driver.find_element(By.XPATH, f"//span[contains(text(), 'CODIGO: {codigo_actual}')]")
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span_nuevo)
@@ -3642,45 +3710,6 @@ class ConsultasSAP:
                 except:
                     self.driver.execute_script("arguments[0].click();", span_nuevo)
                 time.sleep(3)
-
-            # Verificar disponibilidad en página 1
-            # Cantidad > 0 => disponible en tienda => NO crear pedido
-            # Cantidad == 0 => no disponible => SÍ crear pedido en SAP
-            no_disponible = False
-            try:
-                resultado_disp = self.driver.execute_script("""
-                    (() => {
-                        const cantidadElement = $($(".sapMObjectIdentifierTopRow")[3]).next();
-                        if (cantidadElement && cantidadElement.length > 0) {
-                            const cantidadTexto = cantidadElement.text().trim();
-                            const cantidadNum = cantidadTexto.replace(/[^0-9]/g, "");
-                            return {
-                                textoOriginal: cantidadTexto,
-                                cantidad: cantidadNum || "0",
-                                disponible: !!(cantidadNum && parseInt(cantidadNum) > 0)
-                            };
-                        }
-                        return { error: "No encontré el elemento de cantidad" };
-                    })();
-                """)
-
-                if resultado_disp and 'error' not in resultado_disp:
-                    cantidad_stock = resultado_disp.get('cantidad', '0')
-                    disponible = resultado_disp.get('disponible', False)
-                    texto_original = resultado_disp.get('textoOriginal', '')
-                    if disponible:
-                        no_disponible = False
-                        print(f"    [INFO] Material {codigo_actual}: DISPONIBLE en página 1 (cantidad: {texto_original}) → no se creará pedido")
-                    else:
-                        no_disponible = True
-                        print(f"    [INFO] Material {codigo_actual}: NO DISPONIBLE en página 1 (cantidad: {texto_original}) → se creará pedido en SAP")
-                else:
-                    error_msg = resultado_disp.get('error', 'desconocido') if resultado_disp else 'sin respuesta'
-                    print(f"    [WARN] No se pudo leer cantidad de {codigo_actual}: {error_msg} → se asume no disponible")
-                    no_disponible = True
-            except Exception as e_disp:
-                print(f"    [WARN] Error al verificar disponibilidad de {codigo_actual}: {str(e_disp)[:100]} → se asume no disponible")
-                no_disponible = True
 
             # Extraer precios
             spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")

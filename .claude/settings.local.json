@@ -4,7 +4,11 @@
       "Bash(py -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f'OK: {f}'\\) for f in ['main.py', 'modulos/login_sap.py', 'modulos/driver_selenium.py', 'modulos/consultas_sap.py']]\")",
       "Bash(py -c ' *)",
       "PowerShell(Get-Command *)",
-      "Bash(pyinstaller main.spec --clean)"
+      "Bash(pyinstaller main.spec --clean)",
+      "Bash(Get-ChildItem -Recurse -Depth 2)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(pyinstaller RPA_Auteco.spec --noconfirm)",
+      "PowerShell(python -m PyInstaller --version 2>&1; python --version 2>&1; where python 2>&1)"
     ]
   }
 }

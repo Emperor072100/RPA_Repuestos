@@ -603,8 +603,18 @@ class RPA_AUTECO:
         """Abre (o reabre) las dos pestañas del navegador y devuelve sus handles"""
         self.driver_sap.ir_a_url(url_portal)
         portal_tab = self.driver_sap.driver.current_window_handle
-        self.driver_sap.driver.execute_script("window.open('', '_blank');")
-        sap_tab = [h for h in self.driver_sap.driver.window_handles if h != portal_tab][0]
+
+        # Abrir segunda pestaña con reintento por si el popup blocker tarda en desactivarse
+        for intento in range(5):
+            self.driver_sap.driver.execute_script("window.open('', '_blank');")
+            time.sleep(1)
+            nuevos = [h for h in self.driver_sap.driver.window_handles if h != portal_tab]
+            if nuevos:
+                sap_tab = nuevos[0]
+                break
+        else:
+            raise RuntimeError("No se pudo abrir la segunda pestaña para SAP")
+
         self.driver_sap.driver.switch_to.window(sap_tab)
         self.driver_sap.driver.get(URL_SAP)
         return portal_tab, sap_tab
@@ -740,7 +750,7 @@ class RPA_AUTECO:
                             if self.gestor_excel:
                                 self.gestor_excel.actualizar_estado(
                                     indice_excel_previo,
-                                    "Omitido - Disponible en tienda",
+                                    "Disponibilidad dealer",
                                     f"Disponibles en página 1: {', '.join(p['codigo'] for p in precios_portal)}"
                                 )
                             clientes_fallidos += 1
