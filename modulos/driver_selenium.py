@@ -61,6 +61,19 @@ class DriverSAP:
         print("[WARN] Ejecutable de Chrome no encontrado en rutas conocidas")
         return False
 
+    def _puerto_debug_activo(self) -> bool:
+        """Verifica si Chrome ya está corriendo en el puerto de debug"""
+        import urllib.request
+        import json as _json
+        try:
+            with urllib.request.urlopen(
+                f'http://127.0.0.1:{_DEBUG_PORT}/json/list', timeout=2
+            ) as resp:
+                targets = _json.loads(resp.read())
+                return any(t.get('type') == 'page' for t in targets)
+        except Exception:
+            return False
+
     def _esperar_puerto_debug(self, timeout=20):
         """Espera a que Chrome tenga al menos una pestaña de tipo page disponible"""
         import urllib.request
@@ -80,34 +93,34 @@ class DriverSAP:
 
     def crear_driver(self):
         """
-        Cierra Chrome, lo relanza en modo debug y conecta Selenium.
+        Si Chrome ya está corriendo en el puerto debug, se conecta directamente
+        sin matar ni relanzar el proceso (preserva cookies y sesión activa).
+        Si no, cierra Chrome, lo relanza en modo debug y conecta Selenium.
 
         Returns:
             Driver de Selenium configurado
         """
         try:
-            self._cerrar_procesos_chrome()
-
             opciones = Options()
-            chrome_iniciado = self._iniciar_chrome_debug()
 
-            if chrome_iniciado:
-                if not self._esperar_puerto_debug():
-                    print("[WARN] Puerto debug no disponible, usando modo estándar")
-                    chrome_iniciado = False
-                else:
-                    # Conectar Selenium al Chrome ya lanzado
+            if self._puerto_debug_activo():
+                print(f"[OK] Chrome ya activo en puerto {_DEBUG_PORT}, reutilizando sesión...")
+                opciones.add_experimental_option("debuggerAddress", f"127.0.0.1:{_DEBUG_PORT}")
+            else:
+                self._cerrar_procesos_chrome()
+                chrome_iniciado = self._iniciar_chrome_debug()
+
+                if chrome_iniciado and self._esperar_puerto_debug():
                     opciones.add_experimental_option("debuggerAddress", f"127.0.0.1:{_DEBUG_PORT}")
-
-            if not chrome_iniciado:
-                # Fallback: Selenium lanza Chrome con opciones anti-detección
-                opciones.add_argument(f"--remote-debugging-port={_DEBUG_PORT}")
-                opciones.add_argument("--disable-blink-features=AutomationControlled")
-                opciones.add_argument("--disable-gpu")
-                opciones.add_argument("--no-sandbox")
-                opciones.add_argument("--disable-dev-shm-usage")
-                opciones.add_experimental_option("excludeSwitches", ["enable-automation"])
-                opciones.add_experimental_option("useAutomationExtension", False)
+                else:
+                    print("[WARN] Puerto debug no disponible, usando modo estándar")
+                    opciones.add_argument(f"--remote-debugging-port={_DEBUG_PORT}")
+                    opciones.add_argument("--disable-blink-features=AutomationControlled")
+                    opciones.add_argument("--disable-gpu")
+                    opciones.add_argument("--no-sandbox")
+                    opciones.add_argument("--disable-dev-shm-usage")
+                    opciones.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    opciones.add_experimental_option("useAutomationExtension", False)
 
             self.driver = webdriver.Chrome(options=opciones)
 
