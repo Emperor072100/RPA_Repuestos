@@ -307,37 +307,31 @@ class ConsultasSAP:
                 time.sleep(2)
                 print("[OK] Busqueda ejecutada")
                 
-                # Seleccionar el solicitante: siempre el número que empieza con '11'
-                print(">> Seleccionando solicitante (numero que empieza con 11)...")
+                # Seleccionar el solicitante: número que empieza con '11' o '22'
+                print(">> Seleccionando solicitante (prefijo 11 o 22)...")
                 resultado = self._seleccionar_fila_popup_por_prefijo('11')
                 if resultado is None:
-                    # Fallback: seleccionar primera coincidencia con Enter
-                    print("  [INFO] Fallback: seleccionando primera coincidencia con Enter")
-                    elemento_activo = self.driver.switch_to.active_element
-                    elemento_activo.send_keys(Keys.RETURN)
-                    time.sleep(2)
+                    print("  [INFO] No encontrado con prefijo 11, intentando con 22...")
+                    resultado = self._seleccionar_fila_popup_por_prefijo('22')
+                if resultado is None:
+                    raise Exception("sin solicitante valido - no se encontro cliente con prefijo 11 ni 22")
                 print("[OK] Solicitante seleccionado")
                 
             except Exception as ex:
+                if "sin solicitante valido" in str(ex):
+                    raise
                 print(f"[WARN] Error con elemento activo: {str(ex)}")
-                
-            except Exception as e:
-                print(f"[WARN] Error al buscar lupa: {str(e)}")
-                print(">> Intentando presionar F4...")
-                try:
-                    campo_solicitante.send_keys(Keys.F4)
-                    time.sleep(2)
-                except:
-                    pass
-            
+
             # Volver al contenido principal
             self.driver.switch_to.default_content()
-            
+
             print("[OK] Cedula ingresada y busqueda activada")
             return True
-            
+
         except Exception as e:
             self.driver.switch_to.default_content()
+            if "sin solicitante valido" in str(e):
+                raise
             print(f"[ERROR] Error al ingresar cedula: {str(e)}")
             return False
 
@@ -345,7 +339,7 @@ class ConsultasSAP:
         """
         En el popup Lst.aciertos, selecciona la fila cuyo número de cliente
         empieza con el prefijo dado (ej: '11' para Solicitante, '55' para Destinatario).
-        Los números de cliente están en los divs con ID patrón M1:46:::ROW:27_l.
+        Los números de cliente están en los divs con ID patrón M1:46:::ROW:1_l.
 
         Returns:
             True si encontró y seleccionó la fila correcta.
@@ -354,10 +348,10 @@ class ConsultasSAP:
         try:
             time.sleep(1)
 
-            # Los números de cliente siempre están en la columna 27 del popup
+            # Los números de cliente están en la columna 1 del popup (M1:46:::ROW:1_l)
             celdas_numero = self.driver.find_elements(
                 By.XPATH,
-                "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
+                "//*[contains(@id, ':1_l') and contains(@id, 'M1:46:::')]"
             )
 
             if not celdas_numero:
@@ -473,32 +467,27 @@ class ConsultasSAP:
                 time.sleep(3)
                 print("[OK] Busqueda ejecutada")
                 
-                # Seleccionar el destinatario: siempre el número que empieza con '55'
-                print(">> Seleccionando destinatario (numero que empieza con 55)...")
+                # Seleccionar el destinatario: solo el número que empieza con '55'
+                print(">> Seleccionando destinatario (prefijo 55)...")
                 resultado = self._seleccionar_fila_popup_por_prefijo('55')
                 if resultado is None:
-                    # Fallback: seleccionar segunda coincidencia por ID conocido
-                    print("  [INFO] Fallback: seleccionando segunda coincidencia (M1:46:::9:1_l)")
-                    try:
-                        segunda_opcion = self.driver.find_element(By.ID, "M1:46:::9:1_l")
-                        print(f"  [OK] Encontrada: '{segunda_opcion.text.strip()}'")
-                        ActionChains(self.driver).double_click(segunda_opcion).perform()
-                        time.sleep(2)
-                        print("[OK] Segunda opcion seleccionada")
-                    except Exception as ex_lista:
-                        print(f"[WARN] Error al seleccionar segunda opcion: {str(ex_lista)}")
+                    raise Exception("sin destinatario valido - no se encontro cliente con prefijo 55")
                 
             except Exception as ex:
+                if "sin destinatario valido" in str(ex):
+                    raise
                 print(f"[WARN] Error: {str(ex)}")
-            
+
             # Volver al contenido principal
             self.driver.switch_to.default_content()
-            
+
             print("[OK] Destinat.mcia. completado")
             return True
-            
+
         except Exception as e:
             self.driver.switch_to.default_content()
+            if "sin destinatario valido" in str(e):
+                raise
             print(f"[ERROR] Error al ingresar destinatario: {str(e)}")
             return False
 
@@ -934,8 +923,16 @@ class ConsultasSAP:
                 return False
 
             if _check_modal_detalle_venta():
-                print("  [CRITICAL] Modal de 'Seleccionar Detalle de Venta' detectado (SAPMSSY0120_1)")
-                print("  [CRITICAL] Este cliente requiere selección manual de detalle de venta")
+                print("  [CRITICAL] Modal 'Areas de ventas para cliente' detectado (SAPMSSY0120_1)")
+                print("  [INFO] Cerrando modal con boton X...")
+                try:
+                    self.driver.switch_to.default_content()
+                    btn_cerrar = self.driver.find_element(By.ID, "SAPMSSY0120_1-close")
+                    btn_cerrar.click()
+                    time.sleep(1)
+                    print("  [OK] Modal cerrado")
+                except Exception as e_close:
+                    print(f"  [WARN] No se pudo cerrar modal: {str(e_close)[:80]}")
                 raise Exception("hay que seleccionar detalle de venta")
             
             # Volver al iframe para buscar modales informativos normales
@@ -954,7 +951,15 @@ class ConsultasSAP:
                     # Verificar que no sea el modal especial SAPMSSY0120_1
                     modal_id = modal.get_attribute("id") or ""
                     if "SAPMSSY0120" in modal_id:
-                        print("  [CRITICAL] Modal SAPMSSY0120_1 detectado en estrategia 1")
+                        print("  [CRITICAL] Modal 'Areas de ventas para cliente' detectado en estrategia 1")
+                        print("  [INFO] Cerrando modal con boton X...")
+                        try:
+                            btn_cerrar = self.driver.find_element(By.ID, "SAPMSSY0120_1-close")
+                            btn_cerrar.click()
+                            time.sleep(1)
+                            print("  [OK] Modal cerrado")
+                        except Exception as e_close:
+                            print(f"  [WARN] No se pudo cerrar modal: {str(e_close)[:80]}")
                         raise Exception("hay que seleccionar detalle de venta")
                     print("  [INFO] Modal informativo detectado (estrategia 1)")
                     modal_encontrado = True
@@ -1582,6 +1587,43 @@ class ConsultasSAP:
             print(f"[ERROR] Error al ingresar valor en condiciones: {str(e)}")
             return False
     
+    def _cerrar_alerta_portal(self, max_espera=5):
+        """
+        Espera hasta max_espera segundos por la alerta SAP UI5 del portal dealer y la cierra.
+        Usa la API interna de SAP UI5 (firePress/close) porque click() DOM no funciona.
+        Retorna True si encontró y cerró el diálogo, False si no había alerta.
+        """
+        for intento in range(max_espera):
+            try:
+                result = self.driver.execute_script("""
+                    try {
+                        var core = sap.ui.getCore();
+                        // Estrategia 1: botón OK fijo de SAP MessageBox
+                        var btn = core.byId('__mbox-btn-0');
+                        if (btn) { btn.firePress(); return 'btn-pressed'; }
+                        // Estrategia 2: buscar cualquier alertdialog abierto y cerrarlo
+                        var dialogs = document.querySelectorAll('[role="alertdialog"]');
+                        for (var i = 0; i < dialogs.length; i++) {
+                            var sapD = core.byId(dialogs[i].id);
+                            if (sapD && sapD.isOpen && sapD.isOpen()) {
+                                sapD.close();
+                                return 'dialog-closed:' + dialogs[i].id;
+                            }
+                        }
+                        return 'no-dialog';
+                    } catch(e) {
+                        return 'error:' + e.message;
+                    }
+                """)
+                if result and str(result) not in ('no-dialog', 'null') and not str(result).startswith('error'):
+                    print(f"  [PORTAL] Alerta cerrada ({result})")
+                    time.sleep(0.5)
+                    return True
+            except Exception as e:
+                print(f"  [DEBUG] _cerrar_alerta_portal excepcion: {str(e)[:80]}")
+            time.sleep(1)
+        return False
+
     def detectar_codigo_reemplazante_portal(self):
         """
         Detecta si existe un modal con código reemplazante en el portal del dealer
@@ -2289,7 +2331,17 @@ class ConsultasSAP:
                     print("  [OK] Click en span del código realizado con JavaScript")
                 
                 time.sleep(3)  # Esperar a que cargue el detalle o aparezca modal
-                
+
+                # Cerrar alerta de error del portal si apareció, y reintentar click si fue necesario
+                if self._cerrar_alerta_portal():
+                    print(f"  [PORTAL] Reintentando click en material tras cerrar alerta...")
+                    try:
+                        span_codigo.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", span_codigo)
+                    time.sleep(3)
+                    self._cerrar_alerta_portal()  # Por si vuelve a aparecer
+
                 # AQUÍ es donde aparece el modal de código reemplazante
                 print(f"  [INFO] Verificando si aparece modal de código reemplazante...")
                 codigo_reemplazante = self.detectar_codigo_reemplazante_portal()
@@ -2376,7 +2428,10 @@ class ConsultasSAP:
                             print("  [OK] Click en span del código reemplazante realizado con JavaScript")
                         
                         time.sleep(3)  # Esperar a que cargue el detalle
-                        
+
+                        # Cerrar alerta de error del portal si apareció
+                        self._cerrar_alerta_portal()
+
                         # Verificar si hay otro modal (poco probable)
                         codigo_reemplazante_2do = self.detectar_codigo_reemplazante_portal()
                         if codigo_reemplazante_2do:
@@ -2395,27 +2450,35 @@ class ConsultasSAP:
             
             # Extraer los valores de precio sin IVA y con IVA
             try:
+                # Cerrar alerta por si apareció durante la carga del detalle
+                self._cerrar_alerta_portal()
                 print(f"  [INFO] Extrayendo precios del portal...")
-                
-                # Buscar todos los spans de texto para encontrar los precios
-                spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")
-                
-                precio_sin_iva_texto = None
-                precio_con_iva_texto = None
-                
-                for i, span in enumerate(spans_texto):
-                    texto = span.text.strip()
-                    # Buscar el precio que contenga "COP"
-                    if "COP" in texto and "$" in texto:
-                        # Verificar si es el primero o segundo precio encontrado
-                        if precio_sin_iva_texto is None:
-                            precio_sin_iva_texto = texto
-                            print(f"  [OK] Precio sin IVA encontrado: {precio_sin_iva_texto}")
-                        elif precio_con_iva_texto is None:
-                            precio_con_iva_texto = texto
-                            print(f"  [OK] Precio con IVA encontrado: {precio_con_iva_texto}")
-                            break  # Ya encontramos los dos precios
-                
+
+                def _buscar_precios():
+                    spans = self.driver.find_elements(By.CLASS_NAME, "sapMText")
+                    sin_iva = None
+                    con_iva = None
+                    for span in spans:
+                        texto = span.text.strip()
+                        if "COP" in texto and "$" in texto:
+                            if sin_iva is None:
+                                sin_iva = texto
+                                print(f"  [OK] Precio sin IVA encontrado: {sin_iva}")
+                            elif con_iva is None:
+                                con_iva = texto
+                                print(f"  [OK] Precio con IVA encontrado: {con_iva}")
+                                break
+                    return sin_iva, con_iva
+
+                precio_sin_iva_texto, precio_con_iva_texto = _buscar_precios()
+
+                # Si no encontró precio, puede ser que la alerta bloqueó la carga — cerrar y reintentar
+                if not precio_sin_iva_texto:
+                    print(f"  [WARN] Precio no encontrado, verificando alerta y reintentando...")
+                    self._cerrar_alerta_portal(max_espera=8)
+                    time.sleep(2)
+                    precio_sin_iva_texto, precio_con_iva_texto = _buscar_precios()
+
                 if not precio_sin_iva_texto:
                     raise Exception("No se pudo encontrar el precio sin IVA")
                 
@@ -3625,6 +3688,11 @@ class ConsultasSAP:
                 self.driver.execute_script("arguments[0].click();", span_codigo)
             time.sleep(3)
 
+            # Si aparece alerta de error del portal, no hay precio disponible — saltar registro
+            if self._cerrar_alerta_portal(max_espera=2):
+                print(f"    [WARN] Alerta del portal detectada para {material}, precio no disponible")
+                return None
+
             # Verificar código reemplazante
             codigo_reemplazante = self.detectar_codigo_reemplazante_portal()
             if codigo_reemplazante:
@@ -3711,11 +3779,20 @@ class ConsultasSAP:
                     self.driver.execute_script("arguments[0].click();", span_nuevo)
                 time.sleep(3)
 
+                # Si aparece alerta en material reemplazante, saltar registro
+                if self._cerrar_alerta_portal(max_espera=2):
+                    print(f"    [WARN] Alerta del portal detectada para reemplazante {codigo_actual}, precio no disponible")
+                    return None
+
+            # Si aparece alerta justo antes de extraer precios, saltar registro
+            if self._cerrar_alerta_portal(max_espera=2):
+                print(f"    [WARN] Alerta del portal detectada antes de extraer precio de {material}, saltando")
+                return None
+
             # Extraer precios
-            spans_texto = self.driver.find_elements(By.CLASS_NAME, "sapMText")
             precio_sin_iva_texto = None
             precio_con_iva_texto = None
-            for span in spans_texto:
+            for span in self.driver.find_elements(By.CLASS_NAME, "sapMText"):
                 texto = span.text.strip()
                 if "COP" in texto and "$" in texto:
                     if precio_sin_iva_texto is None:
@@ -3742,6 +3819,94 @@ class ConsultasSAP:
         except Exception as e:
             print(f"    [ERROR] Error al buscar precio de material {material}: {str(e)}")
             return None
+
+    def _limpiar_modales_bloqueantes(self):
+        """
+        CAPA 1 - BLINDAJE: Detecta y cierra cualquier modal/popup bloqueante.
+        Llamar al inicio de cada paso crítico para garantizar estado limpio.
+
+        - SAPMSSY0120_1 (Áreas de ventas): cierra + raise para skip del cliente
+        - Modal de control de disponibilidad: hace click en Continuar
+        - Cualquier otro dialog visible: intenta cerrar con Escape
+        - Errores del propio shield: se loguean pero nunca detienen el RPA
+        """
+        try:
+            self.driver.switch_to.default_content()
+
+            # 0. Detectar capa bloqueante urPopupWindowBlockLayer
+            # Aparece cuando un popup quedó abierto y tapa todos los elementos clickables
+            try:
+                block_layer = self.driver.find_element(By.ID, "urPopupWindowBlockLayer")
+                if block_layer.is_displayed():
+                    print("  [SHIELD] Capa bloqueante 'urPopupWindowBlockLayer' detectada, cerrando popup con Escape...")
+                    ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                    time.sleep(0.8)
+                    # Si persiste, intentar con Enter
+                    try:
+                        if block_layer.is_displayed():
+                            ActionChains(self.driver).send_keys(Keys.RETURN).perform()
+                            time.sleep(0.5)
+                    except Exception:
+                        pass
+                    print("  [SHIELD] Capa bloqueante eliminada")
+            except NoSuchElementException:
+                pass
+
+            # 1. SAPMSSY0120_1 — requiere skip del cliente
+            try:
+                modal_ventas = self.driver.find_element(By.ID, "SAPMSSY0120_1")
+                if modal_ventas.is_displayed():
+                    print("  [SHIELD] Modal 'Areas de ventas' bloqueando, cerrando...")
+                    try:
+                        self.driver.find_element(By.ID, "SAPMSSY0120_1-close").click()
+                        time.sleep(0.8)
+                    except Exception:
+                        pass
+                    raise Exception("hay que seleccionar detalle de venta")
+            except NoSuchElementException:
+                pass
+
+            # 2. Buscar cualquier otro dialog/popup visible
+            dialogs = self.driver.find_elements(
+                By.XPATH, "//*[(@role='dialog' or @ct='PW') and not(contains(@id,'SAPMSSY0120'))]"
+            )
+            for dialog in dialogs:
+                try:
+                    if not dialog.is_displayed():
+                        continue
+                    dialog_id = dialog.get_attribute("id") or "sin-id"
+
+                    # Intentar botón "Continuar" (control de disponibilidad)
+                    cerrado = False
+                    try:
+                        btn_continuar = dialog.find_element(
+                            By.XPATH,
+                            ".//*[@role='button' and (contains(@title,'Continuar') or contains(@title,'Continue'))]"
+                        )
+                        if btn_continuar.is_displayed():
+                            btn_continuar.click()
+                            time.sleep(0.5)
+                            print(f"  [SHIELD] Modal '{dialog_id}' cerrado con Continuar")
+                            cerrado = True
+                    except Exception:
+                        pass
+
+                    # Si no había botón Continuar, cerrar con Escape
+                    if not cerrado:
+                        print(f"  [SHIELD] Modal inesperado '{dialog_id}' detectado, cerrando con Escape...")
+                        ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(0.5)
+                except Exception:
+                    continue
+
+            return True
+
+        except Exception as e:
+            if "hay que seleccionar detalle de venta" in str(e):
+                raise
+            # Nunca bloquear el RPA por un error del propio shield
+            print(f"  [SHIELD] Advertencia en limpiar_modales: {str(e)[:100]}")
+            return True
 
     def recargar_pagina(self):
         """

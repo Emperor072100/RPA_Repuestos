@@ -183,11 +183,12 @@ class RPA_AUTECO:
         Returns:
             True si el procesamiento fue exitoso
         """
+        consultas = None  # inicializar para que el except pueda recargar aunque falle temprano
         try:
             print("\n" + "="*60)
             print(f"PROCESANDO CLIENTE {numero}/{total}")
             print("="*60)
-            
+
             # Obtener índice original del Excel (para actualizar estado correctamente)
             indice_excel = cliente.get('_indice_original', numero - 1)
             
@@ -257,12 +258,18 @@ class RPA_AUTECO:
 
             print("[OK] Datos organizativos llenados correctamente")
 
+            # [SHIELD] Limpiar modales antes de ingresar solicitante
+            consultas._limpiar_modales_bloqueantes()
+
             # Ingresar cédula del solicitante
             print("\n>> Ingresando cedula del solicitante...")
             if not consultas.ingresar_cedula_solicitante(cedula):
                 print("[WARN] No se pudo ingresar la cedula del solicitante, continuando...")
 
             time.sleep(1)
+
+            # [SHIELD] Limpiar modales antes de ingresar destinatario
+            consultas._limpiar_modales_bloqueantes()
 
             # Ingresar cédula del destinatario de mercancía
             print("\n>> Ingresando cedula del destinatario...")
@@ -284,6 +291,9 @@ class RPA_AUTECO:
             if not consultas.seleccionar_modific_cantidad():
                 print("[WARN] No se pudo seleccionar Modific.cantidad, continuando...")
 
+            # [SHIELD] Limpiar modales antes de seleccionar tipo de pedido
+            consultas._limpiar_modales_bloqueantes()
+
             # Seleccionar Pedido Ecommerce Cliente Final
             print("\n>> Seleccionando Pedido Ecommerce Cliente Final...")
             if not consultas.seleccionar_pedido_ecommerce():
@@ -302,18 +312,24 @@ class RPA_AUTECO:
                 print("[WARN] No se pudo confirmar N ped.cliente, continuando...")
 
             time.sleep(3)
-            
+
+            # [SHIELD] Limpiar modales antes de ingresar materiales
+            consultas._limpiar_modales_bloqueantes()
+
             # Ingresar Material y Cantidad para cada repuesto
             print(f"\n>> Ingresando {len(materiales_lista)} Material(es) y Cantidad(es)...")
             materiales_exitosos = 0
             primer_material_exitoso = None
             materiales_omitidos = []
-            
+
             for idx, (material, cantidad) in enumerate(materiales_lista, 1):
                 print(f"\n   ========================================")
                 print(f"   [{idx}/{len(materiales_lista)}] Material: {material}, Cantidad: {cantidad}")
                 print(f"   ========================================")
-                
+
+                # [SHIELD] Limpiar modales antes de cada material
+                consultas._limpiar_modales_bloqueantes()
+
                 if consultas.ingresar_material_cantidad(material, cantidad):
                     materiales_exitosos += 1
                     if primer_material_exitoso is None:
@@ -361,6 +377,9 @@ class RPA_AUTECO:
                 else:
                     raise Exception("No se pudo seleccionar el material - reintentando cliente")
             
+            # [SHIELD] Limpiar modales antes de condiciones
+            consultas._limpiar_modales_bloqueantes()
+
             print("\n>> Haciendo click en pestaña Condiciones...")
             if not consultas.hacer_click_condiciones():
                 motivo = "No se pudo abrir la pestana Condiciones en SAP"
@@ -568,18 +587,33 @@ class RPA_AUTECO:
         except Exception as e:
             error_msg = str(e)
             print(f"\n[ERROR] Error al procesar cliente {numero}: {error_msg}")
-            
-            # Actualizar estado en Excel
+
+            # CAPA 3 - BLINDAJE: recargar SAP siempre para garantizar estado limpio al siguiente cliente
+            try:
+                if consultas is not None:
+                    print("  [SHIELD] Recargando SAP para limpiar estado...")
+                    consultas.recargar_pagina()
+            except Exception as e_reload:
+                print(f"  [SHIELD] Advertencia al recargar: {str(e_reload)[:80]}")
+
+            # Actualizar estado en Excel y decidir si re-lanzar (skip sin reintento) o retornar False
             if self.gestor_excel:
-                # Detectar si es un cliente que debe ser omitido por requerimientos especiales
                 if "hay que seleccionar detalle de venta" in error_msg:
-                    print(f"  [SKIP] Cliente omitido por requerimiento: {error_msg}")
-                    self.gestor_excel.actualizar_estado(indice_excel, "Omitido", "Determinar area de venta")
-                    raise  # Re-lanzar para que el loop no reintente
+                    print(f"  [SKIP] Cliente omitido - multiples areas de venta en SAP")
+                    self.gestor_excel.actualizar_estado(indice_excel, "Creado en SAS", "Imposible crear pedido SAP - multiples areas de venta")
+                    raise
+                elif "sin solicitante valido" in error_msg:
+                    print(f"  [SKIP] Cliente omitido - sin solicitante 11 ni 22")
+                    self.gestor_excel.actualizar_estado(indice_excel, "Omitido", "Sin solicitante valido (sin prefijo 11 ni 22)")
+                    raise
+                elif "sin destinatario valido" in error_msg:
+                    print(f"  [SKIP] Cliente omitido - sin destinatario 55")
+                    self.gestor_excel.actualizar_estado(indice_excel, "Omitido", "Sin destinatario valido (sin prefijo 55)")
+                    raise
                 elif "pedido ya existe" in error_msg.lower():
                     print(f"  [SKIP] Pedido duplicado detectado: {error_msg}")
                     self.gestor_excel.actualizar_estado(indice_excel, "Pedido ya existe", error_msg[:200])
-                    raise  # Re-lanzar para que el loop no reintente
+                    raise
                 elif any(txt in error_msg.lower() for txt in ["bloqueado", "bloqueo", "org de venta", "org.ventas", "no puede ser procesado", "no está previsto", "no est\u00e1 previsto"]):
                     print(f"  [SKIP] Cliente omitido: {error_msg}")
                     self.gestor_excel.actualizar_estado(indice_excel, "Bloqueado", error_msg[:200])
@@ -810,6 +844,10 @@ class RPA_AUTECO:
                                     print(f"\n[SKIP] Pedido duplicado, saltando cliente: {str(e)[:150]}")
                                     exito = False
                                     break
+                                elif "sin solicitante valido" in error_lower or "sin destinatario valido" in error_lower or "hay que seleccionar detalle de venta" in error_lower:
+                                    print(f"\n[SKIP] Cliente omitido por datos SAP invalidos: {str(e)[:150]}")
+                                    exito = False
+                                    break
                                 elif "bloqueo" in error_lower or "bloqueado" in error_lower or ("org" in error_lower and "venta" in error_lower) or "no puede ser procesado" in error_lower:
                                     print(f"\n[SKIP] Error de bloqueo/org ventas: {str(e)[:150]}")
                                     exito = False
@@ -838,6 +876,17 @@ class RPA_AUTECO:
                                 print(f"  [OK] Estados guardados en Excel")
                             except Exception as e:
                                 print(f"  [WARN] Error al guardar Excel: {str(e)[:100]}")
+
+                        # BLINDAJE FINAL: recargar SAP después de cada cliente sin importar el resultado
+                        # Garantiza estado limpio para el siguiente pedido
+                        try:
+                            print("  [SHIELD] Recargando SAP para garantizar estado limpio...")
+                            self.driver_sap.driver.switch_to.default_content()
+                            self.driver_sap.driver.refresh()
+                            time.sleep(3)
+                            print("  [SHIELD] SAP recargado correctamente")
+                        except Exception as e_ref:
+                            print(f"  [SHIELD] Advertencia al recargar SAP: {str(e_ref)[:80]}")
 
                         # Pausa entre clientes
                         if idx < total_clientes:

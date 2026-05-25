@@ -11,7 +11,10 @@
       "PowerShell(python -m PyInstaller --version 2>&1; python --version 2>&1; where python 2>&1)",
       "Bash(pyinstaller main.spec --noconfirm)",
       "PowerShell(python --version; python -m PyInstaller --version 2>&1)",
-      "PowerShell(py *)"
+      "PowerShell(py *)",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', '& \"C:\\\\Users\\\\1040047879\\\\Desktop\\\\RPA Daniela\\\\.venv\\\\Scripts\\\\Activate.ps1\"; cd \"C:\\\\Users\\\\1040047879\\\\Documents\\\\GitHub\\\\RPA_Repuestos\"; py main.py')",
+      "PowerShell(Start-Process cmd -ArgumentList '/k', '\"C:\\\\Users\\\\1040047879\\\\Desktop\\\\RPA Daniela\\\\.venv\\\\Scripts\\\\activate.bat\" && cd /d \"C:\\\\Users\\\\1040047879\\\\Documents\\\\GitHub\\\\RPA_Repuestos\" && py main.py')",
+      "Bash(python *)"
     ]
   }
 }
