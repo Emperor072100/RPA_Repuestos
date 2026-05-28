@@ -339,7 +339,7 @@ class ConsultasSAP:
         """
         En el popup Lst.aciertos, selecciona la fila cuyo número de cliente
         empieza con el prefijo dado (ej: '11' para Solicitante, '55' para Destinatario).
-        Los números de cliente están en los divs con ID patrón M1:46:::ROW:1_l.
+        Los números de cliente están en los divs con ID patrón M1:46:::ROW:27_l.
 
         Returns:
             True si encontró y seleccionó la fila correcta.
@@ -348,10 +348,10 @@ class ConsultasSAP:
         try:
             time.sleep(1)
 
-            # Los números de cliente están en la columna 1 del popup (M1:46:::ROW:1_l)
+            # Los números de cliente están en la columna 27 del popup (M1:46:::ROW:27_l)
             celdas_numero = self.driver.find_elements(
                 By.XPATH,
-                "//*[contains(@id, ':1_l') and contains(@id, 'M1:46:::')]"
+                "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
             )
 
             if not celdas_numero:
