@@ -345,36 +345,41 @@ class ConsultasSAP:
             True si encontró y seleccionó la fila correcta.
             None si no pudo determinar (el llamador debe aplicar su fallback).
         """
-        try:
-            time.sleep(1)
+        for intento in range(2):
+            try:
+                time.sleep(1 if intento == 0 else 2)
 
-            # Los números de cliente están en la columna 27 del popup (M1:46:::ROW:27_l)
-            celdas_numero = self.driver.find_elements(
-                By.XPATH,
-                "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
-            )
+                # Los números de cliente están en la columna 27 del popup (M1:46:::ROW:27_l)
+                celdas_numero = self.driver.find_elements(
+                    By.XPATH,
+                    "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
+                )
 
-            if not celdas_numero:
-                print(f"  [INFO] No se encontraron celdas de numero en popup, usando fallback")
-                return None
+                if not celdas_numero:
+                    print(f"  [INFO] No se encontraron celdas de numero en popup (intento {intento+1}/2)")
+                    if intento == 0:
+                        continue
+                    print(f"  [INFO] Usando fallback")
+                    return None
 
-            print(f"  [INFO] {len(celdas_numero)} fila(s) en popup - analizando prefijos...")
+                print(f"  [INFO] {len(celdas_numero)} fila(s) en popup - analizando prefijos (intento {intento+1}/2)...")
 
-            for celda in celdas_numero:
-                numero = celda.text.strip()
-                print(f"  [INFO] Celda {celda.get_attribute('id')}: '{numero}'")
-                if numero.startswith(prefijo):
-                    print(f"  [OK] Seleccionando fila con cliente {numero} (prefijo '{prefijo}')")
-                    ActionChains(self.driver).double_click(celda).perform()
-                    time.sleep(2)
-                    return True
+                for celda in celdas_numero:
+                    numero = celda.text.strip()
+                    print(f"  [INFO] Celda {celda.get_attribute('id')}: '{numero}'")
+                    if numero.startswith(prefijo):
+                        print(f"  [OK] Seleccionando fila con cliente {numero} (prefijo '{prefijo}')")
+                        ActionChains(self.driver).double_click(celda).perform()
+                        time.sleep(2)
+                        return True
 
-            print(f"  [WARN] No se encontro fila con prefijo '{prefijo}', aplicando fallback")
-            return None
+                print(f"  [WARN] Prefijo '{prefijo}' no encontrado en intento {intento+1}/2")
 
-        except Exception as e:
-            print(f"  [WARN] Error en _seleccionar_fila_popup_por_prefijo: {str(e)}")
-            return None
+            except Exception as e:
+                print(f"  [WARN] Error en _seleccionar_fila_popup_por_prefijo intento {intento+1}: {str(e)}")
+
+        print(f"  [WARN] No se encontro fila con prefijo '{prefijo}' tras 2 intentos, aplicando fallback")
+        return None
 
     def ingresar_cedula_destinatario(self, cedula: str):
         """
@@ -3079,6 +3084,47 @@ class ConsultasSAP:
             traceback.print_exc()
             return False
     
+    def _verificar_y_confirmar_modal_grabar(self):
+        """
+        Detecta el modal de confirmación que aparece al guardar pedidos con múltiples líneas
+        (wnd[1]/usr/btnSPOP-VAROPTION1) y hace click en su botón 'Grabar'.
+        """
+        try:
+            boton_modal = None
+
+            # Estrategia 1: Por SID en lsdata (SPOP-VAROPTION1)
+            try:
+                boton_modal = self.driver.find_element(By.XPATH,
+                    "//div[@role='button' and contains(@lsdata, 'SPOP-VAROPTION1')]")
+                print("  [INFO] Modal de confirmación de guardado detectado (SPOP-VAROPTION1)")
+            except:
+                pass
+
+            # Estrategia 2: Botón con ID M1: y texto Grabar (modal wnd[1])
+            if not boton_modal:
+                try:
+                    boton_modal = self.driver.find_element(By.XPATH,
+                        "//div[contains(@id, 'M1:46::4') and @role='button']")
+                    print("  [INFO] Modal de confirmación de guardado detectado (M1:46::4)")
+                except:
+                    pass
+
+            if boton_modal:
+                print("  >> Haciendo click en 'Grabar' del modal de confirmación...")
+                try:
+                    boton_modal.click()
+                except:
+                    self.driver.execute_script("arguments[0].click();", boton_modal)
+                print("  [OK] Click en 'Grabar' del modal realizado")
+                time.sleep(1.5)
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"  [DEBUG] No se detectó modal de confirmación de guardado: {str(e)[:80]}")
+            return False
+
     def guardar_pedido(self):
         """
         Hace click en el botón 'Grabar' (Guardar) para confirmar y guardar el pedido
@@ -3156,9 +3202,11 @@ class ConsultasSAP:
                 ActionChains(self.driver).key_down(Keys.CONTROL).send_keys('s').key_up(Keys.CONTROL).perform()
                 print("  [OK] Ctrl+S enviado")
             
-            # Esperar a que se procese el guardado
+            # Esperar y verificar si aparece modal de confirmación de guardado
             print("  [INFO] Esperando confirmación de guardado...")
-            time.sleep(3)
+            time.sleep(1.5)
+            self._verificar_y_confirmar_modal_grabar()
+            time.sleep(1.5)
             
             # Extraer número de pedido del mensaje de la barra de estado
             numero_pedido = None
