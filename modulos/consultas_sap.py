@@ -339,7 +339,6 @@ class ConsultasSAP:
         """
         En el popup Lst.aciertos, selecciona la fila cuyo número de cliente
         empieza con el prefijo dado (ej: '11' para Solicitante, '55' para Destinatario).
-        Los números de cliente están en los divs con ID patrón M1:46:::ROW:27_l.
 
         Returns:
             True si encontró y seleccionó la fila correcta.
@@ -349,11 +348,33 @@ class ConsultasSAP:
             try:
                 time.sleep(1 if intento == 0 else 2)
 
-                # Los números de cliente están en la columna 27 del popup (M1:46:::ROW:27_l)
-                celdas_numero = self.driver.find_elements(
-                    By.XPATH,
-                    "//*[contains(@id, ':27_l') and contains(@id, 'M1:46:::')]"
+                celdas_numero = []
+
+                # XPath 1: ct="ALT" (ABAPLISTTEXT) en popup M1:46::: — patrón real observado en DOM
+                candidatos = self.driver.find_elements(
+                    By.XPATH, "//*[@ct='ALT' and contains(@id, 'M1:46:::') and contains(@id, '_l')]"
                 )
+                if candidatos:
+                    print(f"  [INFO] XPath ct=ALT encontró {len(candidatos)} celda(s)")
+                    celdas_numero = candidatos
+
+                # XPath 2: columna 1 explícita (M1:46:::ROW:1_l) como fallback
+                if not celdas_numero:
+                    candidatos = self.driver.find_elements(
+                        By.XPATH, "//*[contains(@id, ':1_l') and contains(@id, 'M1:46:::')]"
+                    )
+                    if candidatos:
+                        print(f"  [INFO] XPath col-1 encontró {len(candidatos)} celda(s)")
+                        celdas_numero = candidatos
+
+                # XPath 3: cualquier _l en M1:46::: con texto de longitud >= 8
+                if not celdas_numero:
+                    candidatos = self.driver.find_elements(
+                        By.XPATH, "//*[contains(@id, 'M1:46:::') and contains(@id, '_l')]"
+                    )
+                    celdas_numero = [c for c in candidatos if len(c.text.strip()) >= 8]
+                    if celdas_numero:
+                        print(f"  [INFO] XPath M1:46:::*_l encontró {len(celdas_numero)} celda(s) con texto")
 
                 if not celdas_numero:
                     print(f"  [INFO] No se encontraron celdas de numero en popup (intento {intento+1}/2)")
@@ -362,10 +383,11 @@ class ConsultasSAP:
                     print(f"  [INFO] Usando fallback")
                     return None
 
-                print(f"  [INFO] {len(celdas_numero)} fila(s) en popup - analizando prefijos (intento {intento+1}/2)...")
+                print(f"  [INFO] {len(celdas_numero)} fila(s) candidatas - buscando prefijo '{prefijo}' (intento {intento+1}/2)...")
 
                 for celda in celdas_numero:
-                    numero = celda.text.strip()
+                    # Limpiar nbsp y espacios invisibles que SAP añade al texto
+                    numero = celda.text.replace('\xa0', '').replace(' ', '').strip()
                     print(f"  [INFO] Celda {celda.get_attribute('id')}: '{numero}'")
                     if numero.startswith(prefijo):
                         print(f"  [OK] Seleccionando fila con cliente {numero} (prefijo '{prefijo}')")
