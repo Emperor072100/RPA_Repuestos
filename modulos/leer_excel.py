@@ -182,27 +182,33 @@ def obtener_datos_organizativos(marca: str) -> Dict[str, str]:
         }
 
 
-def procesar_referencia(cliente: Dict) -> Dict:
+def procesar_referencia(cliente: Dict, cedula: str = None) -> Dict:
     """
     Procesa la columna Referencia del cliente y extrae material y cantidad
-    
+
     Reglas:
     - Si tiene guion (-): descartar cliente
     - Si tiene formato "12345 X2" o "12345 X3": material=12345, cantidad=2 o 3
     - Si tiene formato "12447(4)" o "12447 (4)": material=12447, cantidad=4 (con espacios opcionales)
     - Si empieza con letra: descartar cliente
+    - Si el valor es igual a la cedula del cliente: descartar (nunca es un repuesto valido)
     - Caso normal: material=valor, cantidad=1
-    
+
     Args:
         cliente: Diccionario con información del cliente
-        
+        cedula: Cédula ya extraída del cliente (opcional). Se usa unicamente
+            como validacion de seguridad: un repuesto jamas puede coincidir
+            con la cedula, eso indica que se leyo la columna equivocada.
+
     Returns:
         Diccionario con:
         - materiales: Lista de tuplas (material, cantidad)
         - descartar: True si el cliente debe ser descartado
     """
     import re
-    
+
+    cedula_str = str(cedula).strip() if cedula else None
+
     # Buscar columna de repuesto — dos pasadas para evitar confundir
     # "Referencia moto" (nombre de moto) con "Repuestos" (código numérico)
     referencia_str = None
@@ -217,20 +223,28 @@ def procesar_referencia(cliente: Dict) -> Dict:
     if not referencia_str:
         for columna, valor in cliente.items():
             col_lower = columna.lower()
-            if 'referencia' in col_lower and 'moto' not in col_lower:
+            if 'referencia' in col_lower and 'moto' not in col_lower and 'cedula' not in col_lower:
                 referencia_str = str(valor).strip()
                 break
-    
+
     if not referencia_str or referencia_str == 'nan':
         return {"materiales": [], "descartar": True}
-    
+
     # Dividir por comas para detectar múltiples repuestos
     referencias = [ref.strip() for ref in referencia_str.split(',')]
-    
+
     materiales_lista = []
-    
+
     for referencia in referencias:
         if not referencia:
+            continue
+
+        # Regla de seguridad: un repuesto NUNCA puede ser igual a la cedula del
+        # cliente. Si coincide, es señal de que se leyo la columna equivocada
+        # (p.ej. una columna 'Referencia' que en realidad tiene la cedula) y se
+        # descarta ese valor en vez de usarlo como codigo de material.
+        if cedula_str and referencia == cedula_str:
+            print(f"  [WARN] Referencia '{referencia}' descartada (coincide con la cedula del cliente, no es un repuesto valido)")
             continue
             
         # Verificar si empieza con letra (descartar)

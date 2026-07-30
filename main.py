@@ -19,7 +19,8 @@ from modulos.driver_selenium import DriverSAP
 from modulos.login_sap import LoginSAP
 from modulos.consultas_sap import ConsultasSAP
 from modulos.leer_excel import leer_clientes_excel, obtener_marca, obtener_datos_organizativos, extraer_cedula, extraer_telefono, procesar_referencia, extraer_ciudad, GestorExcelEstados, extraer_id
-from config.credenciales import USUARIO, CONTRASEÑA, URL_SAP
+from config import credenciales as cfg_credenciales
+from config.credenciales import URL_SAP
 
 # Ruta al archivo Excel con los clientes (ahora seleccionable por el usuario)
 # RUTA_EXCEL = r"C:\Users\1018232653\Downloads\base pedidos.xlsx"
@@ -208,7 +209,7 @@ class RPA_AUTECO:
             
             # Procesar referencia para obtener material y cantidad
             print("\n>> Procesando Referencia...")
-            ref_data = procesar_referencia(cliente)
+            ref_data = procesar_referencia(cliente, cedula=cedula)
             
             if ref_data['descartar']:
                 print(f"[SKIP] Cliente {numero} descartado por referencia invalida")
@@ -266,7 +267,7 @@ class RPA_AUTECO:
             if not consultas.ingresar_cedula_solicitante(cedula):
                 print("[WARN] No se pudo ingresar la cedula del solicitante, continuando...")
 
-            time.sleep(1)
+            time.sleep(0.3)
 
             # [SHIELD] Limpiar modales antes de ingresar destinatario
             consultas._limpiar_modales_bloqueantes()
@@ -276,7 +277,7 @@ class RPA_AUTECO:
             if not consultas.ingresar_cedula_destinatario(cedula):
                 print("[WARN] No se pudo ingresar la cedula del destinatario, continuando...")
 
-            time.sleep(1)
+            time.sleep(0.3)
 
             # Ingresar referencia en N° ped.cliente (cedula-material para detección de duplicados)
             primer_material = materiales_lista[0][0] if materiales_lista else None
@@ -708,7 +709,7 @@ class RPA_AUTECO:
             # Recopilar materiales únicos de todos los clientes
             materiales_unicos = {}
             for c in self.clientes:
-                rd = procesar_referencia(c)
+                rd = procesar_referencia(c, cedula=extraer_cedula(c))
                 if not rd['descartar']:
                     for mat, cant in rd['materiales']:
                         if mat not in materiales_unicos:
@@ -739,7 +740,7 @@ class RPA_AUTECO:
 
                     try:
                         # 0. Pre-extraer materiales (sin navegacion)
-                        ref_data_previo = procesar_referencia(cliente)
+                        ref_data_previo = procesar_referencia(cliente, cedula=extraer_cedula(cliente))
                         if ref_data_previo["descartar"]:
                             nombre_previo = cliente.get("Nombre completo", "N/A")
                             print(f"[SKIP] Cliente {idx} ({nombre_previo}) descartado por referencia invalida")
@@ -813,7 +814,7 @@ class RPA_AUTECO:
                         # 3. Login (inteligente: omite si la sesion ya esta activa)
                         print("\n3. Verificando sesion SAP...")
                         login = LoginSAP(self.driver_sap)
-                        if not login.iniciar_sesion(USUARIO, CONTRASEÑA):
+                        if not login.iniciar_sesion(cfg_credenciales.USUARIO, cfg_credenciales.CONTRASEÑA):
                             print(f"[ERROR] Error durante el login para cliente {idx}")
                             clientes_fallidos += 1
                             continue
@@ -957,12 +958,34 @@ def seleccionar_archivo_excel():
     return archivo
 
 
+def preguntar_cambio_clave():
+    """
+    Pregunta en terminal si se desea cambiar la clave de acceso a SAP.
+    Si la respuesta es afirmativa, solicita la nueva clave y la guarda en credenciales.json.
+    Si es negativa (o vacía), continúa el proceso normal con la clave actual.
+    """
+    respuesta = input("¿Desea cambiar la clave de acceso a SAP? (s/n): ").strip().lower()
+
+    if respuesta in ("s", "si", "sí", "y", "yes"):
+        nueva_clave = input("Ingrese la nueva clave: ").strip()
+        if nueva_clave:
+            cfg_credenciales.actualizar_clave(nueva_clave)
+            print("[OK] Clave actualizada correctamente\n")
+        else:
+            print("[WARN] Clave vacía, no se realizaron cambios\n")
+    else:
+        print("[OK] Continuando con la clave actual\n")
+
+
 def main():
     """Función principal"""
 
     print("="*60)
     print("RPA AUTECO - SELECCIÓN DE ARCHIVO")
     print("="*60)
+
+    # Preguntar si se desea cambiar la clave de acceso a SAP
+    preguntar_cambio_clave()
 
     # Seleccionar archivo Excel de clientes
     ruta_excel = seleccionar_archivo_excel()

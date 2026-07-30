@@ -9,7 +9,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 import time
 import re
 
@@ -277,50 +277,39 @@ class ConsultasSAP:
                     print("  [ERROR] No se encontro el campo Solicitante")
                     return False
             
-            # Hacer click en el campo para que aparezca la lupa
-            print(">> Haciendo click en el campo Solicitante...")
-            campo_solicitante.click()
-            time.sleep(0.5)
-            
-            # En lugar de buscar la lupa, usar F4 (atajo estándar de SAP)
-            print(">> Presionando F4 para abrir popup de busqueda...")
-            campo_solicitante.send_keys(Keys.F4)
-            time.sleep(2)
-            print("[OK] Popup de busqueda abierto")
-            
-            # El popup "Limitar ámbito de valores" se abre
-            # El campo "Conc.búsq." suele quedar enfocado automáticamente
-            # Usar el elemento activo directamente
-            print(">> Escribiendo cedula en campo 'Conc.busq.'...")
-            
-            # Primero intentar con el elemento activo (ya enfocado)
+            # Hacer click en el campo, abrir el popup con F4 y buscar la cedula.
+            # Si algo falla a mitad de camino (p.ej. el campo de busqueda queda
+            # 'stale'), '_abrir_popup_y_buscar' reintenta TODO el flujo desde el
+            # click -estado conocido- en vez de adivinar sobre que quedo el foco.
+            print(">> Haciendo click en el campo Solicitante y abriendo popup (F4)...")
             try:
-                campo_busqueda = self.driver.switch_to.active_element
-                campo_busqueda.clear()
-                campo_busqueda.send_keys(str(cedula))
-                time.sleep(0.5)
-                
-                print(f"  [OK] Cedula '{cedula}' escrita en campo activo")
-                
-                print(">> Presionando Enter...")
-                campo_busqueda.send_keys(Keys.RETURN)
-                time.sleep(2)
-                print("[OK] Busqueda ejecutada")
-                
+                if not self._abrir_popup_y_buscar(campo_solicitante, cedula):
+                    raise Exception("no se pudo ejecutar la busqueda del solicitante")
+
                 # Seleccionar el solicitante: número que empieza con '11' o '22'
                 print(">> Seleccionando solicitante (prefijo 11 o 22)...")
-                resultado = self._seleccionar_fila_popup_por_prefijo('11')
+                resultado = self._seleccionar_fila_popup_por_prefijo('11', campo_referencia=campo_solicitante)
                 if resultado is None:
                     print("  [INFO] No encontrado con prefijo 11, intentando con 22...")
-                    resultado = self._seleccionar_fila_popup_por_prefijo('22')
+                    resultado = self._seleccionar_fila_popup_por_prefijo('22', campo_referencia=campo_solicitante)
                 if resultado is None:
                     raise Exception("sin solicitante valido - no se encontro cliente con prefijo 11 ni 22")
                 print("[OK] Solicitante seleccionado")
-                
+
             except Exception as ex:
                 if "sin solicitante valido" in str(ex):
                     raise
                 print(f"[WARN] Error con elemento activo: {str(ex)}")
+                # No se pudo confirmar la seleccion: puede haber quedado un popup a
+                # medio cerrar bloqueando la pantalla. Limpiar antes de devolver
+                # False, para que los pasos siguientes no choquen con 'element click
+                # intercepted' por culpa de este popup sin resolver.
+                try:
+                    self._limpiar_modales_bloqueantes()
+                except Exception:
+                    pass
+                self.driver.switch_to.default_content()
+                return False
 
             # Volver al contenido principal
             self.driver.switch_to.default_content()
@@ -335,18 +324,366 @@ class ConsultasSAP:
             print(f"[ERROR] Error al ingresar cedula: {str(e)}")
             return False
 
-    def _seleccionar_fila_popup_por_prefijo(self, prefijo: str):
+    def _esperar_popup_busqueda_abierto(self, timeout=4):
+        """
+        Espera a que se abra el popup 'Limitar ambito de valores' tras presionar F4,
+        en vez de un sleep fijo. El popup usa ids que empiezan por 'M1:' (a diferencia
+        de la pantalla principal, que usa 'M0:'), asi que basta con detectar que ya
+        existe algun elemento con ese prefijo. Devuelve apenas lo detecta.
+        """
+        try:
+            WebDriverWait(self.driver, timeout, poll_frequency=0.15).until(
+                lambda d: len(d.find_elements(By.XPATH, "//*[starts-with(@id, 'M1:')]")) > 0
+            )
+        except Exception:
+            pass
+
+    def _esperar_resultados_busqueda_popup(self, timeout=6):
+        """
+        Espera a que el popup de busqueda ya tenga resultados renderizados tras
+        presionar ENTER, en vez de un sleep fijo. Usa el mismo patron de celdas
+        (M1:46:::) que despues escanea '_seleccionar_fila_popup_por_prefijo'.
+        """
+        try:
+            WebDriverWait(self.driver, timeout, poll_frequency=0.15).until(
+                lambda d: len(d.find_elements(
+                    By.XPATH, "//*[@ct='ALT' and contains(@id, 'M1:46:::') and contains(@id, '_l')]"
+                )) > 0
+            )
+        except Exception:
+            pass
+
+    def _abrir_popup_y_buscar(self, campo, valor_busqueda: str, intentos: int = 2) -> bool:
+        """
+        Hace click en 'campo', presiona F4 para abrir el popup de busqueda
+        'Limitar ambito de valores', escribe 'valor_busqueda' y confirma con ENTER.
+
+        Si algo falla (p.ej. el campo de busqueda del popup queda 'stale' justo
+        antes del ENTER, ver '_escribir_busqueda_y_confirmar'), reintenta el
+        flujo COMPLETO desde el click sobre 'campo' -un estado conocido-, en vez
+        de adivinar sobre que elemento quedo el foco tras el fallo.
+
+        Args:
+            campo: input sobre el que hacer click + F4 (Solicitante o Destinatario).
+            valor_busqueda: texto a escribir en 'Conc.busq.' (la cedula).
+            intentos: cuantas veces intentar el flujo completo.
+
+        Returns:
+            True si se logro abrir el popup y confirmar la busqueda.
+            False si fallo tras agotar los intentos.
+        """
+        for intento in range(intentos):
+            try:
+                if intento > 0:
+                    print(f"  [INFO] Reintentando apertura de popup + busqueda (intento {intento+1}/{intentos})...")
+                    # El intento anterior pudo dejar el popup a medio abrir/cerrar
+                    # bloqueando la pantalla (capa 'urPopupWindowBlockLayer') o el
+                    # driver fuera del iframe correcto. Limpiar antes de reintentar.
+                    try:
+                        self._limpiar_modales_bloqueantes()
+                    except Exception:
+                        pass
+                    try:
+                        self.driver.switch_to.default_content()
+                        self.driver.switch_to.frame("ITSFRAME1")
+                    except Exception:
+                        pass
+                campo.click()
+                time.sleep(0.3)
+                campo.send_keys(Keys.F4)
+                self._esperar_popup_busqueda_abierto()
+                print("[OK] Popup de busqueda abierto")
+                if self._escribir_busqueda_y_confirmar(valor_busqueda):
+                    return True
+            except Exception as e:
+                print(f"  [WARN] Fallo el intento {intento+1}/{intentos} de abrir popup + buscar: {str(e)[:120]}")
+        return False
+
+    # ID estable del campo 'Conc.busq.' dentro del popup 'Limitar ambito de
+    # valores'. Es el mismo id tanto para el popup del Solicitante como el del
+    # Destinatario (es el mismo dialogo reutilizado). Ubicarlo por este ID es
+    # mucho mas confiable que 'switch_to.active_element', porque no depende de
+    # cual sea el elemento con foco en ese instante (que puede cambiar solo por
+    # el redibujado del 'typeahead' de SAP).
+    ID_CAMPO_CONC_BUSQ_POPUP = "M1:46:1:2B256:1::0:24"
+
+    def _localizar_campo_busqueda_popup(self):
+        """
+        Ubica el campo 'Conc.busq.' del popup por su ID conocido.
+        Devuelve el elemento, o None si todavia no existe / no esta visible.
+        """
+        try:
+            campo = self.driver.find_element(By.ID, self.ID_CAMPO_CONC_BUSQ_POPUP)
+            if campo.is_displayed():
+                return campo
+        except Exception:
+            pass
+        return None
+
+    def _escribir_busqueda_y_confirmar(self, valor_busqueda: str) -> bool:
+        """
+        Escribe el valor en el campo 'Conc.busq.' del popup y presiona ENTER
+        para ejecutar la busqueda.
+
+        Estos campos tienen 'typeahead' en SAP (ListAccess con ResponseData
+        'delta'), es decir que mientras se escribe SAP puede redibujar el DOM en
+        segundo plano. Si eso pasa justo antes del ENTER, la referencia al campo
+        queda 'stale'.
+
+        IMPORTANTE: si el campo queda 'stale', el reintento NO usa
+        'active_element' a ciegas. Se probo eso y causo un bug serio: el
+        elemento activo tras el redibujado puede ya no ser el campo de busqueda
+        sino otro control de la pantalla, y presionar ENTER ahi puede disparar
+        una busqueda SIN el filtro de cedula (o navegar a otra pantalla),
+        devolviendo una lista enorme de clientes sin relacion con la cedula
+        buscada -> el codigo terminaba seleccionando un Destinatario/Solicitante
+        de otra persona. En vez de eso, se reubica el campo por su ID conocido
+        ('_localizar_campo_busqueda_popup'); si ni por ID se puede confirmar
+        cual es el campo correcto, se falla de forma segura.
+
+        Returns:
+            True si se logro escribir y confirmar la busqueda.
+            False si fallo (el llamador NO debe asumir que la busqueda se
+            ejecuto).
+        """
+        try:
+            campo_busqueda = self._localizar_campo_busqueda_popup()
+            if campo_busqueda is None:
+                # Recien abierto el popup, el campo aun no tiene el ID renderizado
+                # en algunos casos: usar el elemento activo solo en este primer
+                # momento (bajo riesgo, nada se ha escrito ni confirmado todavia).
+                campo_busqueda = self.driver.switch_to.active_element
+            campo_busqueda.clear()
+            campo_busqueda.send_keys(str(valor_busqueda))
+            time.sleep(0.5)
+            print(f"  [OK] '{valor_busqueda}' escrito en campo de busqueda")
+
+            print(">> Presionando Enter...")
+            try:
+                campo_busqueda.send_keys(Keys.RETURN)
+            except StaleElementReferenceException:
+                print("  [WARN] Campo de busqueda quedo 'stale', reubicando por ID conocido antes de reintentar ENTER...")
+                campo_reubicado = self._localizar_campo_busqueda_popup()
+                if campo_reubicado is None:
+                    print("  [ERROR] No se pudo reubicar el campo de busqueda por su ID conocido. "
+                          "No se reintenta a ciegas (riesgo de confirmar sobre el elemento "
+                          "equivocado y seleccionar un cliente distinto al buscado).")
+                    return False
+                campo_reubicado.send_keys(Keys.RETURN)
+
+            self._esperar_resultados_busqueda_popup()
+            print("[OK] Busqueda ejecutada")
+            return True
+        except Exception as e:
+            print(f"  [ERROR] No se pudo escribir/confirmar la busqueda: {str(e)[:150]}")
+            return False
+
+    def _js_double_click(self, elemento):
+        """Dispara un evento 'dblclick' via JavaScript (fallback cuando ActionChains no aplica el click)."""
+        self.driver.execute_script(
+            "var ev = new MouseEvent('dblclick', {bubbles: true, cancelable: true, view: window});"
+            "arguments[0].dispatchEvent(ev);",
+            elemento
+        )
+
+    def _click_simple_y_enter(self, elemento):
+        """Click simple sobre el elemento seguido de ENTER (alternativa de seleccion en listas SAP)."""
+        try:
+            elemento.click()
+        except Exception:
+            self.driver.execute_script("arguments[0].click();", elemento)
+        time.sleep(0.3)
+        ActionChains(self.driver).send_keys(Keys.RETURN).perform()
+
+    def _detectar_contexto_capa_bloqueante(self):
+        """
+        Busca la capa bloqueante 'urPopupWindowBlockLayer' tanto en el documento
+        principal como dentro del iframe ITSFRAME1, porque en SAP GUI-for-HTML no
+        siempre es predecible en cual de los dos queda renderizado un popup.
+
+        Deja el driver posicionado en el contexto donde la encontró (o en
+        default_content si no la encontró en ningún lado).
+
+        Returns:
+            'default_content' o 'ITSFRAME1' si la capa esta visible ahi, None si no esta visible en ninguno.
+        """
+        try:
+            self.driver.switch_to.default_content()
+            capa = self.driver.find_element(By.ID, "urPopupWindowBlockLayer")
+            if capa.is_displayed():
+                return "default_content"
+        except (NoSuchElementException, StaleElementReferenceException):
+            pass
+        except Exception:
+            pass
+
+        try:
+            self.driver.switch_to.default_content()
+            self.driver.switch_to.frame("ITSFRAME1")
+            capa = self.driver.find_element(By.ID, "urPopupWindowBlockLayer")
+            if capa.is_displayed():
+                return "ITSFRAME1"
+        except (NoSuchElementException, StaleElementReferenceException):
+            pass
+        except Exception:
+            pass
+
+        try:
+            self.driver.switch_to.default_content()
+        except Exception:
+            pass
+        return None
+
+    def _esperar_cierre_popup_completo(self, timeout=10):
+        """
+        Espera a que desaparezca la capa bloqueante 'urPopupWindowBlockLayer' que SAP
+        deja visible mientras el popup de busqueda termina de cerrarse en el servidor.
+
+        Sin esto, la celda de la fila puede quedar 'stale' (el popup empezo a cerrarse)
+        mientras la capa bloqueante sigue tapando toda la pantalla unos instantes mas
+        -a veces la capa ni siquiera aparece hasta despues de ese primer 'stale'-,
+        lo que provoca 'element click intercepted' en los pasos siguientes
+        (Destinatario, N ped.cliente, Modific.cantidad, etc.).
+
+        Deja el driver en default_content al terminar; el llamador debe volver a
+        cambiar de frame si lo necesita.
+
+        Returns:
+            True si la capa bloqueante no esta presente o desaparecio a tiempo.
+            False si sigue bloqueando tras agotar los reintentos.
+        """
+        inicio = time.time()
+        avisado = False
+        contexto = None
+        while time.time() - inicio < timeout:
+            contexto = self._detectar_contexto_capa_bloqueante()
+            if contexto is None:
+                if avisado:
+                    print("  [OK] Capa bloqueante desaparecio, la pantalla quedo libre para seguir")
+                return True
+            if not avisado:
+                print(f"  [INFO] Capa 'urPopupWindowBlockLayer' visible en '{contexto}', esperando a que el popup termine de cerrarse...")
+                avisado = True
+            time.sleep(0.4)
+
+        # No desaparecio sola dentro del timeout: forzar cierre con ESCAPE (hasta 2 intentos)
+        for intento_escape in range(2):
+            print(f"  [WARN] La capa bloqueante sigue visible tras {timeout}s (contexto '{contexto}'), forzando cierre con ESCAPE (intento {intento_escape+1}/2)...")
+            try:
+                ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                time.sleep(1)
+            except Exception:
+                pass
+            contexto = self._detectar_contexto_capa_bloqueante()
+            if contexto is None:
+                print("  [OK] Capa bloqueante cerrada con ESCAPE")
+                return True
+
+        print("  [ERROR] La capa bloqueante 'urPopupWindowBlockLayer' sigue presente, puede bloquear los siguientes clicks")
+        return False
+
+    def _click_fila_popup_y_verificar(self, celda, numero: str, prefijo: str, campo_referencia=None):
+        """
+        Hace click (doble click) sobre la fila del popup para seleccionarla y
+        verifica que el click realmente se haya aplicado, probando varios
+        métodos si el primero no surte efecto.
+
+        La verificación se hace de dos formas (la que aplique primero gana):
+          a) la celda del popup queda 'stale' o deja de ser visible -> el popup se cerró
+          b) el campo de referencia (Solicitante/Destinatario) queda con un valor
+             que empieza por el prefijo esperado ('11', '22' o '55')
+
+        Una vez confirmado el click, adicionalmente espera a que la capa bloqueante
+        'urPopupWindowBlockLayer' desaparezca antes de devolver el control, para
+        evitar que los pasos siguientes choquen con 'element click intercepted'.
+
+        Returns:
+            True si se pudo confirmar que el click se aplicó.
+            False si se agotaron los métodos sin poder confirmarlo.
+        """
+        def _confirmar(motivo: str) -> bool:
+            print(f"    [OK] {motivo}")
+            self._esperar_cierre_popup_completo()
+            try:
+                self.driver.switch_to.frame("ITSFRAME1")
+            except Exception:
+                pass
+            return True
+
+        metodos = [
+            ("ActionChains.double_click", lambda: ActionChains(self.driver).double_click(celda).perform()),
+            ("JS dispatchEvent(dblclick)", lambda: self._js_double_click(celda)),
+            ("click simple + ENTER", lambda: self._click_simple_y_enter(celda)),
+        ]
+
+        for nombre_metodo, accion in metodos:
+            try:
+                print(f"    >> Intentando click en fila '{numero}' con metodo: {nombre_metodo}")
+                accion()
+            except StaleElementReferenceException:
+                return _confirmar(f"La celda quedo 'stale' al aplicar '{nombre_metodo}' -> el popup se cerro (click aplicado)")
+            except Exception as e_click:
+                print(f"    [WARN] Metodo '{nombre_metodo}' lanzo un error al hacer click: {str(e_click)[:100]}")
+                continue
+
+            # Espera adaptativa (en vez de sleep fijo) a que la celda quede 'stale',
+            # señal de que SAP proceso la seleccion y redibujo la pantalla. Devuelve
+            # apenas lo detecta; si no ocurre en 2s, sigue con las demas verificaciones.
+            try:
+                WebDriverWait(self.driver, 2, poll_frequency=0.15).until(EC.staleness_of(celda))
+                return _confirmar(f"La celda quedo 'stale' tras '{nombre_metodo}' -> click aplicado")
+            except Exception:
+                pass
+
+            # Verificación 1: la celda ya no está en el DOM / dejó de ser visible -> popup cerrado
+            try:
+                sigue_visible = celda.is_displayed()
+            except StaleElementReferenceException:
+                return _confirmar(f"Verificado: la celda ya no existe en el DOM tras '{nombre_metodo}' -> click aplicado")
+
+            if not sigue_visible:
+                return _confirmar(f"Verificado: la celda ya no es visible tras '{nombre_metodo}' -> click aplicado")
+
+            # Verificación 2: el campo de referencia (Solicitante/Destinatario) refleja la seleccion
+            if campo_referencia is not None:
+                try:
+                    valor_campo = (campo_referencia.get_attribute("value") or "")
+                    valor_campo = valor_campo.replace('\xa0', '').strip()
+                    print(f"    [DEBUG] Valor actual del campo de referencia: '{valor_campo}'")
+                    if valor_campo.startswith(prefijo):
+                        return _confirmar(f"Verificado: el campo de referencia quedo en '{valor_campo}' tras '{nombre_metodo}'")
+                    print(f"    [WARN] El campo de referencia aun no refleja la seleccion tras '{nombre_metodo}', probando siguiente metodo...")
+                except StaleElementReferenceException:
+                    return _confirmar(f"El campo de referencia quedo 'stale' (pantalla recargada) tras '{nombre_metodo}' -> asumiendo click aplicado")
+                except Exception as e_verif:
+                    print(f"    [WARN] No se pudo leer el campo de referencia para verificar: {str(e_verif)[:100]}")
+            else:
+                print(f"    [WARN] Popup sigue visible tras '{nombre_metodo}' y no hay campo de referencia para verificar")
+
+        print(f"    [ERROR] No se pudo confirmar el click en la fila '{numero}' tras probar {len(metodos)} metodo(s)")
+        return False
+
+    def _seleccionar_fila_popup_por_prefijo(self, prefijo: str, campo_referencia=None):
         """
         En el popup Lst.aciertos, selecciona la fila cuyo número de cliente
         empieza con el prefijo dado (ej: '11' para Solicitante, '55' para Destinatario).
 
+        Args:
+            prefijo: prefijo del numero de cliente a buscar ('11', '22' o '55')
+            campo_referencia: (opcional) elemento input del campo Solicitante/Destinatario,
+                usado para verificar que el click realmente se aplico.
+
         Returns:
-            True si encontró y seleccionó la fila correcta.
+            True si encontró, hizo click y verificó la selección de la fila correcta.
             None si no pudo determinar (el llamador debe aplicar su fallback).
         """
         for intento in range(2):
             try:
-                time.sleep(1 if intento == 0 else 2)
+                # El llamador ya espero (de forma adaptativa) a que el popup tuviera
+                # resultados antes de invocar esta funcion, asi que en el primer
+                # intento solo hace falta un margen corto de asentamiento. El segundo
+                # intento (reintento tras un click no confirmado) usa un margen mayor.
+                time.sleep(0.3 if intento == 0 else 1.5)
 
                 celdas_numero = []
 
@@ -385,17 +722,33 @@ class ConsultasSAP:
 
                 print(f"  [INFO] {len(celdas_numero)} fila(s) candidatas - buscando prefijo '{prefijo}' (intento {intento+1}/2)...")
 
+                fila_encontrada = False
                 for celda in celdas_numero:
+                    celda_id = celda.get_attribute('id') or ''
+
+                    # La fila 0 (ids 'M1:46:::0:*') es el encabezado / eco del criterio
+                    # de busqueda (ej. columna 'Conc.busq.' mostrando lo que se tecleo),
+                    # NO es una fila de resultado real. Si no se descarta, y la cedula
+                    # buscada empieza justo por '11' o '22', ese eco se confunde con un
+                    # cliente valido y se selecciona el texto buscado en vez del cliente.
+                    if ':::0:' in celda_id:
+                        continue
+
                     # Limpiar nbsp y espacios invisibles que SAP añade al texto
                     numero = celda.text.replace('\xa0', '').replace(' ', '').strip()
-                    print(f"  [INFO] Celda {celda.get_attribute('id')}: '{numero}'")
+                    print(f"  [INFO] Celda {celda_id}: '{numero}'")
                     if numero.startswith(prefijo):
-                        print(f"  [OK] Seleccionando fila con cliente {numero} (prefijo '{prefijo}')")
-                        ActionChains(self.driver).double_click(celda).perform()
-                        time.sleep(2)
-                        return True
+                        fila_encontrada = True
+                        print(f"  [OK] Fila candidata encontrada: cliente {numero} (prefijo '{prefijo}')")
+                        click_confirmado = self._click_fila_popup_y_verificar(celda, numero, prefijo, campo_referencia)
+                        if click_confirmado:
+                            print(f"  [OK] Click confirmado - fila '{numero}' seleccionada correctamente")
+                            return True
+                        print(f"  [WARN] No se pudo confirmar el click en fila '{numero}' (intento {intento+1}/2)")
+                        break  # reintentar desde el outer loop, re-localizando los elementos del popup
 
-                print(f"  [WARN] Prefijo '{prefijo}' no encontrado en intento {intento+1}/2")
+                if not fila_encontrada:
+                    print(f"  [WARN] Prefijo '{prefijo}' no encontrado en intento {intento+1}/2")
 
             except Exception as e:
                 print(f"  [WARN] Error en _seleccionar_fila_popup_por_prefijo intento {intento+1}: {str(e)}")
@@ -417,7 +770,7 @@ class ConsultasSAP:
             
             # Primero volver al default y luego entrar al iframe limpio
             self.driver.switch_to.default_content()
-            time.sleep(1)
+            time.sleep(0.3)
             
             try:
                 self.driver.switch_to.frame("ITSFRAME1")
@@ -470,40 +823,32 @@ class ConsultasSAP:
                 self.driver.switch_to.default_content()
                 return False
             
-            # Click en el campo y F4
-            print(">> Haciendo click en el campo Destinat.mcia...")
-            campo_destinatario.click()
-            time.sleep(0.5)
-            
-            print(">> Presionando F4 para abrir popup de busqueda...")
-            campo_destinatario.send_keys(Keys.F4)
-            time.sleep(2)
-            print("[OK] Popup de busqueda abierto")
-            
-            # Escribir cedula y buscar
-            print(">> Escribiendo cedula en campo 'Conc.busq.'...")
+            # Click en el campo, abrir el popup con F4 y buscar la cedula. Igual que
+            # en Solicitante, '_abrir_popup_y_buscar' reintenta TODO el flujo desde
+            # el click si algo falla, en vez de adivinar sobre que quedo el foco.
+            print(">> Haciendo click en el campo Destinat.mcia y abriendo popup (F4)...")
             try:
-                campo_busqueda = self.driver.switch_to.active_element
-                campo_busqueda.clear()
-                campo_busqueda.send_keys(str(cedula))
-                time.sleep(0.5)
-                print(f"  [OK] Cedula '{cedula}' escrita")
-                
-                print(">> Presionando Enter para buscar...")
-                campo_busqueda.send_keys(Keys.RETURN)
-                time.sleep(3)
-                print("[OK] Busqueda ejecutada")
-                
+                if not self._abrir_popup_y_buscar(campo_destinatario, cedula):
+                    raise Exception("no se pudo ejecutar la busqueda del destinatario")
+
                 # Seleccionar el destinatario: solo el número que empieza con '55'
                 print(">> Seleccionando destinatario (prefijo 55)...")
-                resultado = self._seleccionar_fila_popup_por_prefijo('55')
+                resultado = self._seleccionar_fila_popup_por_prefijo('55', campo_referencia=campo_destinatario)
                 if resultado is None:
                     raise Exception("sin destinatario valido - no se encontro cliente con prefijo 55")
-                
+
             except Exception as ex:
                 if "sin destinatario valido" in str(ex):
                     raise
                 print(f"[WARN] Error: {str(ex)}")
+                # Igual que en Solicitante: si la busqueda no se pudo confirmar, puede
+                # haber quedado un popup a medio cerrar bloqueando la pantalla.
+                try:
+                    self._limpiar_modales_bloqueantes()
+                except Exception:
+                    pass
+                self.driver.switch_to.default_content()
+                return False
 
             # Volver al contenido principal
             self.driver.switch_to.default_content()
@@ -3905,22 +4250,12 @@ class ConsultasSAP:
 
             # 0. Detectar capa bloqueante urPopupWindowBlockLayer
             # Aparece cuando un popup quedó abierto y tapa todos los elementos clickables
-            try:
-                block_layer = self.driver.find_element(By.ID, "urPopupWindowBlockLayer")
-                if block_layer.is_displayed():
-                    print("  [SHIELD] Capa bloqueante 'urPopupWindowBlockLayer' detectada, cerrando popup con Escape...")
-                    ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
-                    time.sleep(0.8)
-                    # Si persiste, intentar con Enter
-                    try:
-                        if block_layer.is_displayed():
-                            ActionChains(self.driver).send_keys(Keys.RETURN).perform()
-                            time.sleep(0.5)
-                    except Exception:
-                        pass
-                    print("  [SHIELD] Capa bloqueante eliminada")
-            except NoSuchElementException:
-                pass
+            # Se revisa tanto en el documento principal como dentro de ITSFRAME1, porque
+            # en SAP GUI-for-HTML no siempre queda renderizada en el mismo contexto.
+            if self._detectar_contexto_capa_bloqueante() is not None:
+                print("  [SHIELD] Capa bloqueante 'urPopupWindowBlockLayer' detectada, cerrando popup con Escape...")
+                self._esperar_cierre_popup_completo(timeout=5)
+            self.driver.switch_to.default_content()
 
             # 1. SAPMSSY0120_1 — requiere skip del cliente
             try:
